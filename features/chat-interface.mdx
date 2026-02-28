@@ -1,0 +1,393 @@
+---
+title: Chat Interface
+description: Ask natural language questions about wallet activity using LLM-powered tools and semantic search
+---
+
+## Overview
+
+Cogniflow's chat interface allows you to interrogate on-chain data using natural language. Powered by an LLM orchestrator, the chat system automatically selects the right tools—deterministic SQL queries or semantic search—to answer your questions with tables, charts, and narrative summaries.
+
+<Info>
+  The chat agent is **read-only** and does not execute transactions or modify on-chain state. It only queries indexed data from your Postgres database.
+</Info>
+
+## How It Works
+
+<Steps>
+  <Step title="Enter a question">
+    Type your query in the chat input field (e.g., "Top counterparties last 7 days")
+  </Step>
+  
+  <Step title="Intent recognition">
+    The orchestrator parses your message to identify:
+    - **Time window** (last 7 days, 30 days, last week, etc.)
+    - **Intent** (counterparties, net flow, semantic search, etc.)
+    - **Parameters** (address, chain, result limits)
+  </Step>
+  
+  <Step title="Tool execution">
+    Based on the recognized intent, the system calls:
+    - **Named SQL queries** for structured insights (top counterparties, net flow summary)
+    - **Semantic search** for discovery-style questions ("find large USDT transfers")
+  </Step>
+  
+  <Step title="Response rendering">
+    The assistant returns:
+    - **Natural language answer** summarizing the results
+    - **Data tables** with formatted rows and columns
+    - **Sources** indicating which database tables were queried
+    - **Debug info** (optional) showing matched intent and query details
+  </Step>
+</Steps>
+
+<Tip>
+  You can expand the debug section in each chat turn to see exactly which tools were invoked and how your query was interpreted.
+</Tip>
+
+## Supported Queries
+
+### Top Counterparties
+
+Identifies the addresses you've interacted with most frequently during a specified time window.
+
+**Example prompts:**
+- "Top 5 counterparties last 14 days"
+- "Who did I transact with most in the last month?"
+- "Show counterparties last week"
+
+**Response includes:**
+- Ranked list of addresses
+- Incoming volume per counterparty
+- Outgoing volume per counterparty
+- Total transfer count
+
+<Tabs>
+  <Tab title="Query Logic">
+    The agent:
+    1. Filters transfers by your wallet address and time range
+    2. Aggregates by counterparty (the other party in each transfer)
+    3. Sums incoming and outgoing token amounts
+    4. Ranks by total volume (incoming + outgoing)
+    5. Returns top N results (default: 5, max: 25)
+  </Tab>
+  
+  <Tab title="Example Output">
+    | Rank | Counterparty | Incoming | Outgoing | Net | Transfers |
+    |------|-------------|----------|----------|-----|----------|
+    | 1 | 0xabc123… | 1,234 USDT | 567 USDT | 1,801 | 12 |
+    | 2 | 0xdef456… | 0 DAI | 890 DAI | 890 | 3 |
+    | 3 | 0xghi789… | 450 WETH | 200 WETH | 650 | 8 |
+  </Tab>
+</Tabs>
+
+### Net Flow Summary
+
+Calculates aggregate incoming vs. outgoing transfers for a time period.
+
+**Example prompts:**
+- "Net flow last 7 days"
+- "Show incoming and outgoing volume this week"
+- "What's my net position last month?"
+- "Gas spent last 30 days" (includes ETH transfers if indexed)
+
+**Response includes:**
+- Total incoming volume (sum of all credits)
+- Total outgoing volume (sum of all debits)
+- Net volume (incoming - outgoing)
+- Transfer counts by direction
+
+<Note>
+  Net flow queries aggregate across **all tokens**. For token-specific analysis, use semantic search or the dashboard's holdings table.
+</Note>
+
+### Semantic Search
+
+Uses OpenAI embeddings to find transfers matching your natural language description.
+
+**Example prompts:**
+- "Find large USDT transfers"
+- "Search for transactions to Uniswap"
+- "Show me similar transfers to the one on 2/15"
+- "Discover outgoing payments over $10k"
+
+**How it works:**
+1. Your query is converted to a 768-dimensional vector embedding (via OpenAI `text-embedding-3-small`)
+2. The embedding is compared against pre-computed embeddings for all indexed transfers (stored in `tx_embeddings`)
+3. Results are ranked by cosine similarity (higher = more relevant)
+4. Additional filters apply based on keywords:
+   - **Amount ranking**: "largest", "biggest", "huge" → sorts by USD value descending
+   - **Time ranking**: "latest", "recent" → sorts by timestamp descending; "oldest" → ascending
+   - **Direction**: "incoming", "received" → filters to credits; "outgoing", "sent" → debits
+
+<Warning>
+  **Embeddings prerequisite**: Semantic search requires the `/api/embeddings` job to have run at least once. Without embeddings, the search endpoint returns a 503 error.
+</Warning>
+
+<Tabs>
+  <Tab title="Query Strategies">
+    | Keyword | Behavior |
+    |---------|----------|
+    | "largest", "big", "high", "million" | Sort by USD value (or token amount if no price) descending |
+    | "smallest", "tiny", "min" | Sort by value ascending |
+    | "latest", "recent", "newest" | Sort by timestamp descending |
+    | "oldest", "earliest", "first" | Sort by timestamp ascending |
+    | "incoming", "received", "deposits" | Filter to transfers where you're the recipient |
+    | "outgoing", "sent", "withdrawals" | Filter to transfers where you're the sender |
+  </Tab>
+  
+  <Tab title="Example Output">
+    | Timestamp | From | To | Amount | Symbol | Similarity | Tx |
+    |-----------|------|-----|--------|--------|------------|----|
+    | 2/28/26 3:45 PM | 0xabc123… | 0xdef456… | 5000 | USDT | 0.923 | 0x12ab34cd… |
+    | 2/27/26 11:20 AM | 0xghi789… | 0xjkl012… | 4800 | USDT | 0.891 | 0x56ef78gh… |
+  </Tab>
+</Tabs>
+
+## Using the Chat Panel
+
+### Basic Workflow
+
+<CardGroup cols={2}>
+  <Card title="Ask a question" icon="comment">
+    Type your prompt in the input field at the bottom of the chat panel
+  </Card>
+  
+  <Card title="Review the response" icon="table">
+    The assistant displays:
+    - A summary paragraph
+    - Data tables with formatted results
+    - Sources (database tables used)
+  </Card>
+  
+  <Card title="Iterate" icon="arrows-rotate">
+    Ask follow-up questions to refine your analysis (each question is independent—no conversation memory yet)
+  </Card>
+  
+  <Card title="Clear history" icon="trash">
+    Click **Clear** to reset the chat panel and start fresh
+  </Card>
+</CardGroup>
+
+### Example Prompts
+
+<AccordionGroup>
+  <Accordion title="Counterparty analysis">
+    - "Top 10 counterparties last 30 days"
+    - "Who sent me the most tokens this week?"
+    - "Show all addresses I've interacted with in the last 7 days"
+  </Accordion>
+  
+  <Accordion title="Flow summaries">
+    - "Net flow last 14 days"
+    - "How much did I receive vs send last month?"
+    - "Total incoming volume this year"
+  </Accordion>
+  
+  <Accordion title="Semantic discovery">
+    - "Find the largest USDC transfer last week"
+    - "Search for transactions involving Aave"
+    - "Show me incoming payments over $5000"
+    - "Discover outgoing transfers to exchanges"
+  </Accordion>
+  
+  <Accordion title="Time-based queries">
+    - "Oldest transfer in my history"
+    - "Most recent transaction"
+    - "First time I interacted with this token"
+  </Accordion>
+</AccordionGroup>
+
+## Understanding Responses
+
+### Anatomy of a Chat Turn
+
+Each assistant response includes:
+
+1. **Natural language summary** — A concise answer to your question (1-2 sentences)
+2. **Data tables** — Structured results with column headers and formatted rows
+3. **Sources** — Which database tables or tools were used (e.g., `transfers`, `tx_embeddings`)
+4. **Debug info** (collapsible) — Matched intent, inferred time window, available queries, and search parameters
+
+<Tip>
+  If the assistant says "I'm not sure which insight you need," try rephrasing with more specific keywords (e.g., "counterparties", "net flow", "search").
+</Tip>
+
+### Chart Placeholders
+
+Some queries return chart data, but rendering is not yet implemented. You'll see:
+
+```
+Chart placeholder (bar) – integrate a chart library to render { ... }
+```
+
+<Note>
+  Future releases will include interactive charts powered by Recharts or Chart.js. For now, use the data tables to export results or visualize externally.
+</Note>
+
+## Conversation Context
+
+<Warning>
+  **Current limitation**: The chat interface does **not** maintain conversation history across turns. Each question is treated independently.
+</Warning>
+
+This means:
+- You cannot reference previous answers (e.g., "Show me more" won't work)
+- Follow-up questions must re-specify context (e.g., "Top counterparties last 14 days" → "Show me their incoming volume")
+- The `messages` array is sent to the backend but only the latest user message is parsed
+
+**Workaround**: Rephrase follow-ups as standalone queries:
+- Instead of: "What about outgoing?"
+- Use: "Show outgoing volume for top counterparties last 14 days"
+
+<Info>
+  Conversational memory is planned for a future release. The backend already accepts a message history array, so this will be a straightforward enhancement.
+</Info>
+
+## Time Window Inference
+
+The chat orchestrator automatically extracts time ranges from your query:
+
+| Pattern | Interpreted As |
+|---------|----------------|
+| "last 7 days" | Past 7 days from now |
+| "last week" | Past 7 days from now |
+| "last 2 weeks" | Past 14 days from now |
+| "last 30 days" or "last month" | Past 30 days from now |
+| No time keyword | Defaults to last 7 days |
+
+<Tip>
+  To query a specific range (e.g., "January 2026"), use semantic search with a descriptive query like "transfers in January 2026" and filter results manually.
+</Tip>
+
+## SQL Tools Under the Hood
+
+The chat agent uses **named queries** — pre-defined, allowlisted SQL templates that prevent injection attacks.
+
+### Available Tools
+
+<CardGroup cols={2}>
+  <Card title="topCounterparties" icon="users">
+    Parameters:
+    - `address` (your wallet)
+    - `chain` (e.g., `eth`)
+    - `start` (ISO timestamp)
+    - `end` (ISO timestamp)
+    - `limit` (1-25)
+    
+    Returns: Ranked list of addresses with aggregated volumes
+  </Card>
+  
+  <Card title="netFlowSummary" icon="arrow-right-arrow-left">
+    Parameters:
+    - `address`
+    - `chain`
+    - `start`
+    - `end`
+    
+    Returns: Incoming/outgoing/net volumes and transfer counts
+  </Card>
+</CardGroup>
+
+<Note>
+  To add custom queries, extend the `sqlQueries.ts` file with new named templates and update the intent recognition logic in `/api/chat/route.ts`.
+</Note>
+
+## Enabling Semantic Search
+
+Semantic search requires two setup steps:
+
+<Steps>
+  <Step title="Configure OpenAI">
+    Set `OPENAI_API_KEY` in your environment (`.env.local` or Vercel project settings)
+  </Step>
+  
+  <Step title="Generate embeddings">
+    Run the embeddings job to vectorize your transfer data:
+    ```bash
+    curl -X POST https://your-app.vercel.app/api/embeddings \
+      -H "Authorization: Bearer <INGESTION_SECRET>" \
+      -H "Content-Type: application/json" \
+      -d '{"chain":"eth","maxRecords":200}'
+    ```
+    
+    Or schedule it as a cron job (recommended for continuous updates)
+  </Step>
+</Steps>
+
+<Warning>
+  Embeddings are **not retroactive**. Only transfers indexed **before** the job runs will be vectorized. Re-run the job periodically to cover new transfers.
+</Warning>
+
+### Embedding Details
+
+- **Model**: `text-embedding-3-small` (configurable via `EMBEDDING_MODEL`)
+- **Dimensions**: 768 (configurable via `EMBEDDING_DIM`)
+- **Storage**: Vectors are stored in the `tx_embeddings` table with pgvector's `vector` type
+- **Input format**: Each transfer is serialized as: `<symbol> transfer of <amount> from <from_addr> to <to_addr> on <timestamp>`
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Be specific" icon="bullseye">
+    Include keywords like "counterparties", "net flow", or "search" to guide intent recognition
+  </Card>
+  
+  <Card title="Specify time ranges" icon="calendar">
+    Always mention a time window ("last 7 days", "last month") to avoid ambiguity
+  </Card>
+  
+  <Card title="Use semantic search for discovery" icon="magnifying-glass">
+    For open-ended questions ("find large transfers"), semantic search is more flexible than SQL tools
+  </Card>
+  
+  <Card title="Export data externally" icon="download">
+    For advanced analysis, copy table results into a spreadsheet or BI tool
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Chat returns 'I'm not sure which insight you need'">
+    Your query didn't match any known intents. Try:
+    - Adding explicit keywords: "counterparties", "net flow", "search"
+    - Simplifying the question: "Top 5 counterparties last week" instead of "Who are my main contacts?"
+  </Accordion>
+  
+  <Accordion title="Semantic search returns no results">
+    Possible causes:
+    - **No embeddings**: Run `POST /api/embeddings` to generate vectors
+    - **Query too narrow**: Broaden your search (e.g., "large transfers" instead of "transfers over $10,000 to Binance on Feb 15")
+    - **No matching transfers**: Your wallet may not have activity matching the query within the indexed range
+  </Accordion>
+  
+  <Accordion title="Tables show incorrect amounts">
+    Check:
+    - **Price availability**: USD values require the `/api/prices` job to have run
+    - **Token decimals**: Some tokens have non-standard decimals; verify the `decimals` field in raw data
+    - **Stale data**: Re-sync the wallet via the dashboard to refresh transfers
+  </Accordion>
+</AccordionGroup>
+
+## Roadmap
+
+<Info>
+  Planned enhancements for the chat interface:
+  - **Conversation memory** to support follow-up questions
+  - **Interactive charts** rendered inline (Recharts/Chart.js)
+  - **Custom query builder** for power users to write safe SQL without code
+  - **Multi-wallet comparison** (e.g., "Compare net flow between 0xabc and 0xdef")
+  - **Export to CSV/JSON** directly from chat tables
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Semantic Search" href="/features/semantic-search" icon="brain">
+    Deep dive into vector embeddings and discovery queries
+  </Card>
+  
+  <Card title="Dashboard" href="/features/dashboard" icon="chart-line">
+    Explore visual portfolio analytics and transfer history
+  </Card>
+</CardGroup>

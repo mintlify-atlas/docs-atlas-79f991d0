@@ -1,0 +1,143 @@
+---
+title: Installation
+description: Install dependencies and bootstrap the Cogniflow monorepo
+---
+
+## Prerequisites
+
+Before installing Cogniflow, ensure you have the following:
+
+- Node.js (v20 or later recommended)
+- npm (comes with Node.js)
+- PostgreSQL database with pgvector extension (Supabase recommended)
+- Git
+
+## Monorepo Structure
+
+Cogniflow uses npm workspaces to manage a monorepo with two main packages:
+
+- `web/` - Next.js 15 application (chat UI, dashboard, API routes)
+- `worker/` - Node.js indexer and scheduled jobs for data ingestion
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone <repository-url>
+    cd cogniflow
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Run the following command from the root directory to bootstrap all workspace dependencies:
+
+    ```bash
+    npm install
+    ```
+
+    This will install dependencies for:
+    - Root workspace (Prisma tooling)
+    - `web/` workspace (Next.js, React 19, Supabase clients)
+    - `worker/` workspace (indexer scripts)
+  </Step>
+
+  <Step title="Set up environment variables">
+    Copy the example environment file and configure your settings:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    See [Environment Variables](/setup/environment-variables) for detailed configuration.
+  </Step>
+
+  <Step title="Initialize the database">
+    Run Prisma migrations to create all required tables and enable pgvector:
+
+    ```bash
+    npx prisma migrate dev
+    ```
+
+    This will:
+    - Create the `extensions` schema and enable the `vector` extension
+    - Create tables: `blocks`, `transfers`, `prices`, `tx_embeddings`, `users`, `wallets`
+    - Set up indexes for optimal query performance
+
+    <Note>
+      Ensure `DATABASE_URL` and `DIRECT_URL` are configured in your `.env` file before running migrations.
+    </Note>
+  </Step>
+
+  <Step title="Generate Prisma Client">
+    Generate the Prisma Client whenever the schema changes:
+
+    ```bash
+    npx prisma generate
+    ```
+  </Step>
+
+  <Step title="Start the development server">
+    Launch the Next.js application:
+
+    ```bash
+    npm run dev -w web
+    ```
+
+    The app will be available at [http://localhost:3000](http://localhost:3000)
+  </Step>
+
+  <Step title="Sign up and authenticate">
+    Before accessing the dashboard:
+    
+    1. Visit [http://localhost:3000/signup](http://localhost:3000/signup) to create an account
+    2. Confirm your email if required by your Supabase configuration
+    3. Sign in at [http://localhost:3000/signin](http://localhost:3000/signin)
+
+    See [Authentication](/setup/authentication) for OAuth and email provider setup.
+  </Step>
+</Steps>
+
+## Key Dependencies
+
+### Root Workspace
+
+- **Prisma** (v6.17.0) - ORM and migration tooling
+- **@prisma/client** (v6.17.0) - Database client
+
+### Web Workspace
+
+- **Next.js** (v15.5.4) - React framework
+- **React** (v19.1.0) - UI library
+- **Supabase** (v2.75.0) - Authentication and database client
+- **Tailwind CSS** (v4) - Styling framework
+- **TypeScript** (v5) - Type safety
+- **Zod** (v3.23.8) - Schema validation
+
+## Next Steps
+
+After installation:
+
+1. Configure [Environment Variables](/setup/environment-variables) for RPC providers, API keys, and feature flags
+2. Set up [Supabase Authentication](/setup/authentication) with email/password and OAuth providers
+3. Review [Database Configuration](/setup/database) to understand the schema and pgvector setup
+4. Start tracking wallets and ingesting on-chain data
+
+## Worker Scripts
+
+The `worker/` package provides scheduled jobs for background tasks:
+
+```bash
+# Ingest ERC-20 transfers for tracked wallets
+npm run start -w worker
+
+# Enrich tokens with USD prices from CoinGecko
+npm run start:prices -w worker
+
+# Generate OpenAI embeddings for semantic search
+npm run start:embeddings -w worker
+```
+
+<Note>
+  In production, schedule these jobs via Vercel Cron, GitHub Actions, or another scheduler by calling `/api/ingest`, `/api/prices`, and `/api/embeddings` with `Authorization: Bearer <INGESTION_SECRET>`.
+</Note>

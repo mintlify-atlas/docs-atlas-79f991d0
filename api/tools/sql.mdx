@@ -1,0 +1,257 @@
+---
+title: SQL Tool
+description: Execute named SQL queries
+---
+
+## Overview
+
+The SQL tool endpoint provides access to predefined SQL queries for wallet analysis. It supports both listing available queries and executing them with parameters.
+
+<Info>
+  This endpoint does not require authentication for listing queries. Execution uses the same access model.
+</Info>
+
+## GET /tool/sql
+
+List all available named queries.
+
+### Request
+
+No parameters required.
+
+```bash
+curl https://your-domain.com/tool/sql
+```
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Returns `"ok"`
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Container for query list
+  
+  <Expandable title="properties">
+    <ResponseField name="queries" type="array">
+      Array of available query names
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "queries": [
+      "topCounterparties",
+      "netFlowSummary"
+    ]
+  }
+}
+```
+
+## POST /tool/sql
+
+Execute a named query with parameters.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Name of the query to execute (must be in the list from GET endpoint)
+</ParamField>
+
+<ParamField body="params" type="object" default="{}">
+  Query-specific parameters (see Available Queries below)
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Returns `"ok"` on success
+</ResponseField>
+
+<ResponseField name="data" type="any" required>
+  Query results (structure depends on the query)
+</ResponseField>
+
+## Available Queries
+
+### topCounterparties
+
+Find the most active addresses interacting with a wallet.
+
+**Parameters:**
+
+<ParamField body="params.address" type="string" required>
+  Wallet address to analyze
+</ParamField>
+
+<ParamField body="params.chain" type="string" required>
+  Blockchain network (e.g., `"eth"`)
+</ParamField>
+
+<ParamField body="params.start" type="string" required>
+  Start timestamp (ISO 8601)
+</ParamField>
+
+<ParamField body="params.end" type="string" required>
+  End timestamp (ISO 8601)
+</ParamField>
+
+<ParamField body="params.limit" type="number" default="5">
+  Maximum number of results
+</ParamField>
+
+**Example Request:**
+
+```bash
+curl -X POST https://your-domain.com/tool/sql \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "topCounterparties",
+    "params": {
+      "address": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+      "chain": "eth",
+      "start": "2024-01-01T00:00:00.000Z",
+      "end": "2024-01-15T00:00:00.000Z",
+      "limit": 10
+    }
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "data": [
+    {
+      "counterparty": "0x1234567890abcdef1234567890abcdef12345678",
+      "incomingVolume": "1000.50",
+      "outgoingVolume": "500.25",
+      "totalVolume": "1500.75",
+      "transferCount": 25
+    }
+  ]
+}
+```
+
+### netFlowSummary
+
+Summarize incoming and outgoing transfers for a wallet.
+
+**Parameters:**
+
+<ParamField body="params.address" type="string" required>
+  Wallet address to analyze
+</ParamField>
+
+<ParamField body="params.chain" type="string" required>
+  Blockchain network (e.g., `"eth"`)
+</ParamField>
+
+<ParamField body="params.start" type="string" required>
+  Start timestamp (ISO 8601)
+</ParamField>
+
+<ParamField body="params.end" type="string" required>
+  End timestamp (ISO 8601)
+</ParamField>
+
+**Example Request:**
+
+```bash
+curl -X POST https://your-domain.com/tool/sql \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "netFlowSummary",
+    "params": {
+      "address": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+      "chain": "eth",
+      "start": "2024-01-01T00:00:00.000Z",
+      "end": "2024-01-15T00:00:00.000Z"
+    }
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "incomingVolume": "5000.00",
+    "outgoingVolume": "2000.00",
+    "netVolume": "3000.00",
+    "incomingCount": 87,
+    "outgoingCount": 42
+  }
+}
+```
+
+## Error Responses
+
+### Invalid Request Payload
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "Invalid request payload",
+  "issues": [
+    {
+      "path": ["name"],
+      "message": "Required"
+    }
+  ]
+}
+```
+
+### Unknown Query Name
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "Unknown query name: invalidQueryName"
+}
+```
+
+### Query Execution Error
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "Error description here"
+}
+```
+
+## Use Cases
+
+- **Custom analytics**: Execute predefined queries programmatically
+- **Integration**: Build custom dashboards using query results
+- **Automation**: Schedule reports using SQL tool queries
+- **AI agents**: Allow AI to query wallet data using named queries
+
+## Notes
+
+- Queries are predefined in the codebase for security
+- Parameters are validated using Zod schemas
+- All queries return JSON-serializable data
+- Query results structure depends on the specific query
+- This endpoint is used internally by the `/api/chat` endpoint
+
+## Best Practices
+
+1. **Discover queries**: Call GET endpoint first to see available queries
+2. **Validate parameters**: Ensure all required parameters are provided
+3. **Handle errors**: Implement proper error handling for failed queries
+4. **Type safety**: Use TypeScript types from query definitions
+5. **Performance**: Some queries may be expensive on large datasets

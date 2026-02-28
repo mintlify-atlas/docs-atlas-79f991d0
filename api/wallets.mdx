@@ -1,0 +1,194 @@
+---
+title: Add Wallet
+description: Add and sync a wallet address
+---
+
+## POST /api/wallets
+
+Add a wallet address to track and optionally trigger immediate ingestion of transfer history.
+
+<Info>
+  Requires Supabase session authentication. See [Authentication](/api/authentication) for details.
+</Info>
+
+### Request Body
+
+<ParamField body="address" type="string" required>
+  Ethereum wallet address (must be a valid 0x-prefixed hex string with 40 characters)
+</ParamField>
+
+<ParamField body="chain" type="string" default="eth">
+  Blockchain network. Defaults to the `ETH_CHAIN` environment variable or `"eth"`
+</ParamField>
+
+<ParamField body="ingest" type="boolean" default="true">
+  Whether to immediately sync transfer data. Set to `false` to skip initial sync
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Response status: `"ok"`, `"partial"`, or `"error"`
+</ResponseField>
+
+<ResponseField name="walletId" type="string">
+  Database ID of the wallet record
+</ResponseField>
+
+<ResponseField name="chain" type="string">
+  The chain the wallet was added to
+</ResponseField>
+
+<ResponseField name="address" type="string">
+  Normalized wallet address (lowercase)
+</ResponseField>
+
+<ResponseField name="ingested" type="boolean">
+  Whether ingestion was attempted
+</ResponseField>
+
+<ResponseField name="sync" type="object">
+  Sync information if ingestion was performed
+  
+  <Expandable title="properties">
+    <ResponseField name="fromBlock" type="number">
+      Starting block number for sync
+    </ResponseField>
+    
+    <ResponseField name="toBlock" type="number">
+      Ending block number for sync
+    </ResponseField>
+    
+    <ResponseField name="latestBlock" type="number">
+      Latest block number in the chain
+    </ResponseField>
+    
+    <ResponseField name="transfers" type="number">
+      Number of transfers processed
+    </ResponseField>
+    
+    <ResponseField name="hasMore" type="boolean">
+      Whether more transfers remain to be synced
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="ingestionError" type="string">
+  Error message if ingestion failed (only present when `status` is `"partial"`)
+</ResponseField>
+
+### Examples
+
+#### Add wallet with automatic sync
+
+```bash
+curl -X POST https://your-domain.com/api/wallets \
+  -H "Content-Type: application/json" \
+  -b "cookies.txt" \
+  -d '{
+    "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+    "chain": "eth"
+  }'
+```
+
+#### Response
+
+```json
+{
+  "status": "ok",
+  "walletId": "cm4a8b9c0d1e2f3g4h5i6j7k8",
+  "chain": "eth",
+  "address": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+  "ingested": true,
+  "sync": {
+    "fromBlock": 18500000,
+    "toBlock": 18501500,
+    "latestBlock": 18501500,
+    "transfers": 47,
+    "hasMore": false
+  }
+}
+```
+
+#### Add wallet without immediate sync
+
+```bash
+curl -X POST https://your-domain.com/api/wallets \
+  -H "Content-Type: application/json" \
+  -b "cookies.txt" \
+  -d '{
+    "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+    "ingest": false
+  }'
+```
+
+### Error Responses
+
+#### Unauthorized
+
+Status code: `401`
+
+```json
+{
+  "status": "error",
+  "message": "unauthorized"
+}
+```
+
+#### Invalid JSON
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "invalid_json"
+}
+```
+
+#### Invalid Request
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "invalid_request",
+  "issues": {
+    "fieldErrors": {
+      "address": ["Required"]
+    }
+  }
+}
+```
+
+#### Invalid Address
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "invalid_address"
+}
+```
+
+#### Missing Email
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "missing_email"
+}
+```
+
+### Configuration
+
+The following environment variables control sync behavior:
+
+- `UI_SYNC_MAX_PAGES` - Maximum pages to fetch per sync (default: 2)
+- `UI_SYNC_LOOKBACK_BLOCKS` - How many blocks to look back (default: 1500)
+- `UI_SYNC_MIN_INTERVAL_MS` - Minimum time between syncs in milliseconds (default: 300000 / 5 minutes)
+- `ETH_CHAIN` - Default blockchain network (default: "eth")

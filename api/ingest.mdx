@@ -1,0 +1,304 @@
+---
+title: Ingest Transfers
+description: Background job to sync wallet transfer data
+---
+
+## POST /api/ingest
+
+Background job endpoint to sync transfer data for one or more wallets. Typically called by scheduled jobs or webhook triggers.
+
+<Warning>
+  Requires bearer token authentication with `INGESTION_SECRET`. See [Authentication](/api/authentication) for details.
+</Warning>
+
+### Authentication
+
+```bash
+Authorization: Bearer YOUR_INGESTION_SECRET
+```
+
+### Request Body
+
+All fields are optional. Empty body processes a batch of wallets.
+
+<ParamField body="address" type="string">
+  Specific wallet address to sync (lowercase, 0x-prefixed). If provided, only this wallet is synced
+</ParamField>
+
+<ParamField body="chain" type="string" default="eth">
+  Blockchain network. Defaults to `ETH_CHAIN` environment variable or `"eth"`
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Status: `"ok"` if all wallets succeeded, `"error"` if any failed
+</ResponseField>
+
+<ResponseField name="processed" type="number" required>
+  Number of wallets successfully processed
+</ResponseField>
+
+<ResponseField name="remaining" type="number" required>
+  Estimated number of wallets remaining to sync
+</ResponseField>
+
+<ResponseField name="done" type="boolean" required>
+  Whether all wallets are fully synced
+</ResponseField>
+
+<ResponseField name="results" type="object" required>
+  Detailed results
+  
+  <Expandable title="properties">
+    <ResponseField name="successes" type="array">
+      Array of successful sync results
+      
+      <Expandable title="Success object properties">
+        <ResponseField name="walletId" type="string">
+          Database ID of the wallet
+        </ResponseField>
+        
+        <ResponseField name="address" type="string">
+          Wallet address
+        </ResponseField>
+        
+        <ResponseField name="chain" type="string">
+          Blockchain network
+        </ResponseField>
+        
+        <ResponseField name="fromBlock" type="number">
+          Starting block for this sync
+        </ResponseField>
+        
+        <ResponseField name="toBlock" type="number">
+          Ending block for this sync
+        </ResponseField>
+        
+        <ResponseField name="latestBlock" type="number">
+          Latest block in the chain
+        </ResponseField>
+        
+        <ResponseField name="transfersProcessed" type="number">
+          Number of transfers synced
+        </ResponseField>
+        
+        <ResponseField name="hasMore" type="boolean">
+          Whether more blocks remain to sync
+        </ResponseField>
+        
+        <ResponseField name="skipped" type="boolean">
+          Whether sync was skipped due to recent sync
+        </ResponseField>
+        
+        <ResponseField name="durationMs" type="number">
+          Time taken in milliseconds
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="failures" type="array">
+      Array of failed sync attempts
+      
+      <Expandable title="Failure object properties">
+        <ResponseField name="walletId" type="string">
+          Database ID of the wallet
+        </ResponseField>
+        
+        <ResponseField name="address" type="string">
+          Wallet address
+        </ResponseField>
+        
+        <ResponseField name="error" type="string">
+          Error message
+        </ResponseField>
+        
+        <ResponseField name="durationMs" type="number">
+          Time taken before failure
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Examples
+
+#### Sync batch of wallets
+
+```bash
+curl -X POST https://your-domain.com/api/ingest \
+  -H "Authorization: Bearer ${INGESTION_SECRET}" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+#### Sync specific wallet
+
+```bash
+curl -X POST https://your-domain.com/api/ingest \
+  -H "Authorization: Bearer ${INGESTION_SECRET}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "address": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+    "chain": "eth"
+  }'
+```
+
+#### Success Response
+
+Status code: `200`
+
+```json
+{
+  "status": "ok",
+  "processed": 5,
+  "remaining": 15,
+  "done": false,
+  "results": {
+    "successes": [
+      {
+        "walletId": "cm4a1b2c3d4e5f6g7h8i9j0k",
+        "address": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+        "chain": "eth",
+        "fromBlock": 18500000,
+        "toBlock": 18501500,
+        "latestBlock": 18501500,
+        "transfersProcessed": 47,
+        "hasMore": false,
+        "skipped": false,
+        "durationMs": 3450
+      }
+    ],
+    "failures": []
+  }
+}
+```
+
+#### Error Response (with failures)
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "processed": 4,
+  "remaining": 16,
+  "done": false,
+  "results": {
+    "successes": [
+      {
+        "walletId": "cm4a1b2c3d4e5f6g7h8i9j0k",
+        "address": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+        "chain": "eth",
+        "fromBlock": 18500000,
+        "toBlock": 18501500,
+        "latestBlock": 18501500,
+        "transfersProcessed": 47,
+        "hasMore": false,
+        "skipped": false,
+        "durationMs": 3450
+      }
+    ],
+    "failures": [
+      {
+        "walletId": "cm4b2c3d4e5f6g7h8i9j0k1l",
+        "address": "0xabcdef1234567890abcdef1234567890abcdef12",
+        "error": "Rate limit exceeded",
+        "durationMs": 1200
+      }
+    ]
+  }
+}
+```
+
+#### No Wallets Response
+
+Status code: `200`
+
+```json
+{
+  "status": "ok",
+  "processed": 0,
+  "remaining": 0,
+  "message": "no_wallets_matched",
+  "results": {
+    "successes": [],
+    "failures": []
+  },
+  "done": true
+}
+```
+
+### Error Responses
+
+#### Unauthorized
+
+Status code: `401`
+
+```json
+{
+  "status": "error",
+  "message": "unauthorized"
+}
+```
+
+#### Server Not Configured
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "server_not_configured"
+}
+```
+
+### Configuration
+
+Environment variables control sync behavior:
+
+```bash
+# Required
+INGESTION_SECRET=your-secret-token
+
+# Optional - controls sync behavior
+INGESTION_BATCH_SIZE=1          # Wallets to process per request
+INGESTION_MAX_PAGES=8           # Max API pages to fetch per wallet
+INGESTION_MAX_BLOCK_SPAN=50000  # Max blocks to sync per run
+INGESTION_SKIP_RECENT_MS=600000 # Skip if synced within 10 minutes
+ETH_CHAIN=eth                    # Default chain
+```
+
+### Batch Processing
+
+When no `address` is specified:
+
+1. Fetches `INGESTION_BATCH_SIZE` wallets (default: 1)
+2. Prioritizes wallets by `lastSyncedAt` (oldest first)
+3. Returns `remaining` count for job scheduling
+4. Sets `done: true` when all wallets are fully synced
+
+### Single Wallet Processing
+
+When `address` is specified:
+
+1. Syncs only that wallet
+2. Returns `done: true` if wallet is fully synced
+3. Returns `done: false` if `hasMore` is true (needs another run)
+
+### Scheduling
+
+Recommended cron job setup:
+
+```bash
+# Every 10 minutes
+*/10 * * * * curl -X POST https://your-domain.com/api/ingest \
+  -H "Authorization: Bearer ${INGESTION_SECRET}"
+```
+
+### Use Cases
+
+- **Scheduled jobs**: Regular background sync via cron
+- **Webhook triggers**: Sync specific wallet on-demand
+- **Backfill**: Process historical data in batches
+- **Real-time updates**: Keep transfer data current

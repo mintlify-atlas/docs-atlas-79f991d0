@@ -1,0 +1,275 @@
+---
+title: Chat
+description: AI-powered wallet insights and queries
+---
+
+## POST /api/chat
+
+Get AI-powered insights about wallet activity using natural language queries. The endpoint automatically interprets the query and executes the appropriate analysis.
+
+<Info>
+  This endpoint does not require authentication but may be rate-limited.
+</Info>
+
+### Request Body
+
+<ParamField body="messages" type="array" required>
+  Array of message objects representing the conversation history
+  
+  <Expandable title="Message object properties">
+    <ParamField body="role" type="enum" required>
+      Message role: `system`, `user`, or `assistant`
+    </ParamField>
+    
+    <ParamField body="content" type="string" required>
+      Message content (minimum 1 character)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="address" type="string" required>
+  Ethereum wallet address to analyze (must be 0x-prefixed, 40 hex characters)
+</ParamField>
+
+<ParamField body="chain" type="enum" default="eth">
+  Blockchain network (currently only `"eth"` is supported)
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Returns `"ok"` on success
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Analysis results
+  
+  <Expandable title="properties">
+    <ResponseField name="answer" type="string">
+      Natural language answer to the query
+    </ResponseField>
+    
+    <ResponseField name="tables" type="array">
+      Array of table objects with structured data
+      
+      <Expandable title="Table object properties">
+        <ResponseField name="title" type="string">
+          Table title
+        </ResponseField>
+        
+        <ResponseField name="columns" type="array">
+          Array of column names
+        </ResponseField>
+        
+        <ResponseField name="rows" type="array">
+          Array of row data (each row is an array matching column order)
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="chart" type="object | null">
+      Chart configuration (currently unused, reserved for future use)
+    </ResponseField>
+    
+    <ResponseField name="sources" type="array">
+      Data sources used (e.g., `["transfers"]`, `["tx_embeddings"]`)
+    </ResponseField>
+    
+    <ResponseField name="debug" type="object">
+      Debug information
+      
+      <Expandable title="properties">
+        <ResponseField name="availableQueries" type="array">
+          List of available named queries
+        </ResponseField>
+        
+        <ResponseField name="interpretedWindow" type="object">
+          Time window extracted from query
+        </ResponseField>
+        
+        <ResponseField name="matchedIntent" type="string | null">
+          Matched query intent (e.g., `"topCounterparties"`, `"netFlowSummary"`, `"semanticSearch"`)
+        </ResponseField>
+        
+        <ResponseField name="searchQuery" type="string">
+          Semantic search query (only present for semantic search)
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Supported Query Types
+
+#### 1. Top Counterparties
+
+Find the most active addresses interacting with the wallet.
+
+**Example queries:**
+- "Top 5 counterparties last 7 days"
+- "Show me the top 10 addresses I've interacted with this month"
+- "Who are my most frequent counterparties?"
+
+#### 2. Net Flow Summary
+
+Summary of incoming and outgoing transfers.
+
+**Example queries:**
+- "Net flow last week"
+- "Show incoming and outgoing transfers last 30 days"
+- "How much gas did I spend this month?"
+- "Net position last 14 days"
+
+#### 3. Semantic Search
+
+Find specific transfers using natural language.
+
+**Example queries:**
+- "Find large USDC transfers"
+- "Search for transactions with Uniswap"
+- "Show me similar transfers to address 0x123..."
+- "Lookup my biggest transactions"
+
+<Warning>
+  Semantic search requires `OPENAI_API_KEY` environment variable to be configured.
+</Warning>
+
+### Examples
+
+#### Top counterparties query
+
+```bash
+curl -X POST https://your-domain.com/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": "Show me the top 5 counterparties from the last 7 days"
+      }
+    ],
+    "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+    "chain": "eth"
+  }'
+```
+
+#### Response Example
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "answer": "Top counterparties last 7 days: 1. 0x1234567890… (100 in, 50 out); 2. 0xabcdef1234… (75 in, 25 out); 3. 0x9876543210… (60 in, 40 out).",
+    "tables": [
+      {
+        "title": "Top counterparties (last 7 days)",
+        "columns": ["Rank", "Counterparty", "Incoming", "Outgoing", "Net", "Transfers"],
+        "rows": [
+          [1, "0x1234567890abcdef1234567890abcdef12345678", "100", "50", "150", 15],
+          [2, "0xabcdef1234567890abcdef1234567890abcdef12", "75", "25", "100", 12],
+          [3, "0x9876543210fedcba9876543210fedcba98765432", "60", "40", "100", 10]
+        ]
+      }
+    ],
+    "chart": null,
+    "sources": ["transfers"],
+    "debug": {
+      "availableQueries": ["topCounterparties", "netFlowSummary"],
+      "interpretedWindow": {
+        "start": "2024-01-08T12:00:00.000Z",
+        "end": "2024-01-15T12:00:00.000Z",
+        "label": "last 7 days",
+        "days": 7
+      },
+      "matchedIntent": "topCounterparties"
+    }
+  }
+}
+```
+
+#### Net flow query
+
+```bash
+curl -X POST https://your-domain.com/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is my net flow last 30 days?"
+      }
+    ],
+    "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"
+  }'
+```
+
+#### Semantic search query
+
+```bash
+curl -X POST https://your-domain.com/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {
+        "role": "user",
+        "content": "Find my largest USDC transfers"
+      }
+    ],
+    "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"
+  }'
+```
+
+### Error Responses
+
+#### Missing User Message
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "A user message is required for orchestration."
+}
+```
+
+#### Invalid Address
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "Invalid request payload",
+  "issues": [
+    {
+      "path": ["address"],
+      "message": "Address must be a 0x-prefixed hex string."
+    }
+  ]
+}
+```
+
+#### Semantic Search Not Configured
+
+Status code: `200` (returns in data)
+
+```json
+{
+  "status": "error",
+  "message": "Semantic search requires OPENAI_API_KEY. Configure it before using this capability."
+}
+```
+
+### Time Window Parsing
+
+The endpoint automatically parses time references from natural language:
+
+- "last 7 days" → 7 days
+- "last 2 weeks" → 14 days  
+- "last month" / "last 30 days" → 30 days
+- "past 3 days" → 3 days
+- Default: 7 days if no time reference found
+
+### Configuration
+
+- `OPENAI_API_KEY` - Required for semantic search functionality

@@ -1,0 +1,90 @@
+---
+title: API Overview
+description: Introduction to the Cogniflow REST API
+---
+
+## Base URL
+
+The Cogniflow API is available at:
+
+```
+https://your-domain.com/api
+```
+
+Replace `your-domain.com` with your actual deployment domain.
+
+## Response Format
+
+All API responses follow a consistent JSON structure:
+
+### Success Response
+
+```json
+{
+  "status": "ok",
+  "data": { ... }
+}
+```
+
+### Error Response
+
+```json
+{
+  "status": "error",
+  "message": "error_description"
+}
+```
+
+Some error responses include additional details:
+
+```json
+{
+  "status": "error",
+  "message": "invalid_request",
+  "issues": { ... }
+}
+```
+
+## HTTP Status Codes
+
+The API uses standard HTTP status codes:
+
+| Status Code | Description |
+|-------------|-------------|
+| `200` | Success |
+| `400` | Bad Request - Invalid parameters or JSON |
+| `401` | Unauthorized - Missing or invalid authentication |
+| `500` | Internal Server Error |
+| `503` | Service Unavailable - Required configuration missing |
+
+## Common Error Messages
+
+| Error Code | Description |
+|------------|-------------|
+| `unauthorized` | Authentication failed or missing |
+| `invalid_json` | Request body is not valid JSON |
+| `invalid_request` | Request parameters failed validation |
+| `invalid_query_params` | Query string parameters are invalid |
+| `database_unreachable` | Database connection failed |
+| `internal_error` | Unexpected server error |
+| `server_not_configured` | Required environment variable not set |
+
+## Rate Limiting
+
+Rate limiting details depend on your deployment configuration. Implement exponential backoff for retry logic.
+
+## Pagination
+
+Endpoints that return lists support cursor-based pagination:
+
+- Use the `limit` parameter to control page size
+- Use the `cursor` parameter to fetch the next page
+- Check `hasMore` in the response to determine if more pages exist
+- Use `nextCursor` from the response as the `cursor` for the next request
+
+## Next Steps
+
+- [Authentication](/api/authentication) - Learn about authentication methods
+- [Wallets](/api/wallets) - Add and sync wallet addresses
+- [Transfers](/api/transfers) - Query wallet transfers
+- [Chat](/api/chat) - Use AI-powered insights

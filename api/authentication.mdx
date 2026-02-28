@@ -1,0 +1,109 @@
+---
+title: Authentication
+description: How to authenticate with the Cogniflow API
+---
+
+## Authentication Methods
+
+Cogniflow uses two different authentication methods depending on the endpoint:
+
+### 1. Supabase Session Authentication
+
+User-facing endpoints (wallets, transfers, portfolio, chat, search) require Supabase session authentication via cookies.
+
+**Endpoints using Supabase auth:**
+- `POST /api/wallets`
+- `GET /api/transfers`
+- `GET /api/portfolio`
+- `POST /api/chat`
+- `GET /api/search`
+
+**Authentication Flow:**
+
+1. User authenticates with Supabase
+2. Session cookie is set automatically
+3. Subsequent API requests include the session cookie
+4. API validates the session and extracts user ID
+
+**Error Responses:**
+
+```json
+{
+  "status": "error",
+  "message": "unauthorized"
+}
+```
+
+Status code: `401`
+
+### 2. Bearer Token Authentication
+
+Background job endpoints require a bearer token with the `INGESTION_SECRET` environment variable.
+
+**Endpoints using bearer token:**
+- `POST /api/ingest`
+- `POST /api/prices`
+- `POST /api/embeddings`
+
+**Request Headers:**
+
+```bash
+Authorization: Bearer YOUR_INGESTION_SECRET
+```
+
+**Example:**
+
+```bash
+curl -X POST https://your-domain.com/api/ingest \
+  -H "Authorization: Bearer ${INGESTION_SECRET}" \
+  -H "Content-Type: application/json" \
+  -d '{"chain": "eth"}'
+```
+
+**Error Responses:**
+
+Missing or invalid token:
+
+```json
+{
+  "status": "error",
+  "message": "unauthorized"
+}
+```
+
+Status code: `401`
+
+Server not configured:
+
+```json
+{
+  "status": "error",
+  "message": "server_not_configured"
+}
+```
+
+Status code: `500`
+
+### 3. No Authentication
+
+Some endpoints are publicly accessible:
+- `GET /api/healthz` - Health check
+- `GET /tool/sql` - List available queries
+
+## Security Best Practices
+
+1. **Keep secrets secure**: Never commit `INGESTION_SECRET` to version control
+2. **Use HTTPS**: Always use HTTPS in production
+3. **Rotate tokens**: Regularly rotate your ingestion secret
+4. **Validate sessions**: Session cookies are validated on every request
+5. **Environment variables**: Store all secrets in environment variables
+
+## Configuration
+
+Set the following environment variable for bearer token authentication:
+
+```bash
+INGESTION_SECRET=your-secret-token-here
+```
+
+For Supabase authentication, ensure your Supabase project is properly configured with the web application.

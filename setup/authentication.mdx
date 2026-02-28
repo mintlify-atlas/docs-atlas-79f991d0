@@ -1,0 +1,292 @@
+---
+title: Authentication
+description: Set up Supabase Auth with email/password and OAuth providers
+---
+
+## Overview
+
+Cogniflow uses **Supabase Auth** for user authentication. Users must sign in before accessing wallet data, the dashboard, or chat features.
+
+## Supported Authentication Methods
+
+- Email/password with optional email confirmation
+- OAuth providers (Google, GitHub, etc.)
+- Email magic links (optional)
+
+## Prerequisites
+
+Before configuring authentication:
+
+1. Create a Supabase project at [supabase.com](https://supabase.com)
+2. Note your project URL and anon key from **Settings → API**
+3. Add these to your `.env` file:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL="https://[project-id].supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+## Email/Password Setup
+
+<Steps>
+  <Step title="Enable Email Provider">
+    1. Go to **Authentication → Providers** in your Supabase dashboard
+    2. Ensure **Email** is enabled (enabled by default)
+    3. Choose whether to require email confirmation:
+       - **Enabled:** Users must verify their email before signing in (recommended for production)
+       - **Disabled:** Users can sign in immediately (useful for development)
+  </Step>
+
+  <Step title="Configure SMTP (Optional)">
+    If email confirmation is enabled, configure SMTP to deliver verification emails:
+
+    1. Navigate to **Authentication → Email Templates**
+    2. Go to **Settings → Auth → SMTP Settings**
+    3. Configure your SMTP provider (e.g., SendGrid, AWS SES, Resend)
+    4. Test the configuration by sending a test email
+
+    <Note>
+      For local development, you can disable email confirmations temporarily. Supabase provides a default SMTP service for projects, but it's rate-limited.
+    </Note>
+  </Step>
+
+  <Step title="Configure Redirect URLs">
+    Add your application URLs to the allowed redirect list:
+
+    1. Go to **Authentication → URL Configuration**
+    2. Add your URLs to **Redirect URLs**:
+       - Development: `http://localhost:3000/**`
+       - Production: `https://yourdomain.com/**`
+    3. Set **Site URL** to your primary domain
+  </Step>
+
+  <Step title="Test Sign-Up Flow">
+    1. Start your development server: `npm run dev -w web`
+    2. Navigate to [http://localhost:3000/signup](http://localhost:3000/signup)
+    3. Create a test account with email and password
+    4. If confirmations are enabled, check your email and verify
+    5. Sign in at [http://localhost:3000/signin](http://localhost:3000/signin)
+  </Step>
+</Steps>
+
+## OAuth Setup (Google)
+
+<Steps>
+  <Step title="Enable Google Provider">
+    1. Go to **Authentication → Providers** in Supabase
+    2. Find **Google** and toggle it on
+    3. Click **Configure** to enter credentials
+  </Step>
+
+  <Step title="Create Google OAuth App">
+    1. Visit [Google Cloud Console](https://console.cloud.google.com)
+    2. Create a new project (or select an existing one)
+    3. Navigate to **APIs & Services → Credentials**
+    4. Click **Create Credentials → OAuth 2.0 Client ID**
+    5. Configure the consent screen:
+       - App name: Cogniflow
+       - User support email: your email
+       - Scopes: `email`, `profile`, `openid`
+    6. Choose **Application type: Web application**
+    7. Add **Authorized redirect URIs**:
+       ```
+       https://[project-id].supabase.co/auth/v1/callback
+       ```
+    8. Copy the **Client ID** and **Client Secret**
+  </Step>
+
+  <Step title="Configure Supabase">
+    1. Return to Supabase **Authentication → Providers → Google**
+    2. Paste your **Client ID** and **Client Secret**
+    3. Save the configuration
+  </Step>
+
+  <Step title="Test OAuth Flow">
+    1. Navigate to [http://localhost:3000/signin](http://localhost:3000/signin)
+    2. Click the Google sign-in button
+    3. Authorize the application
+    4. Verify you're redirected back to the dashboard
+  </Step>
+</Steps>
+
+<Note>
+  Google OAuth requires your redirect URIs to use HTTPS in production. Use the Supabase callback URL exactly as shown: `https://[project-id].supabase.co/auth/v1/callback`
+</Note>
+
+## OAuth Setup (GitHub)
+
+<Steps>
+  <Step title="Enable GitHub Provider">
+    1. Go to **Authentication → Providers** in Supabase
+    2. Find **GitHub** and toggle it on
+  </Step>
+
+  <Step title="Create GitHub OAuth App">
+    1. Visit [GitHub Developer Settings](https://github.com/settings/developers)
+    2. Click **New OAuth App**
+    3. Configure the application:
+       - **Application name:** Cogniflow
+       - **Homepage URL:** `https://yourdomain.com` (or `http://localhost:3000` for dev)
+       - **Authorization callback URL:** `https://[project-id].supabase.co/auth/v1/callback`
+    4. Click **Register application**
+    5. Generate a **Client Secret**
+    6. Copy the **Client ID** and **Client Secret**
+  </Step>
+
+  <Step title="Configure Supabase">
+    1. Return to Supabase **Authentication → Providers → GitHub**
+    2. Paste your **Client ID** and **Client Secret**
+    3. Save the configuration
+  </Step>
+</Steps>
+
+## User Management
+
+Cogniflow automatically creates a `users` table record when a user signs up. The schema:
+
+```prisma
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  wallets   Wallet[]
+
+  @@map("users")
+}
+```
+
+### User-Wallet Relationship
+
+Each user can track multiple wallets across different chains:
+
+```prisma
+model Wallet {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  chain           String
+  address         String
+  lastSyncedBlock Int?      @map("last_synced_block")
+  lastSyncedAt    DateTime? @map("last_synced_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chain, address])
+  @@map("wallets")
+}
+```
+
+## Authentication Flow
+
+1. **Sign-Up:** User creates account at `/signup`
+2. **Email Verification:** User confirms email (if enabled)
+3. **Sign-In:** User authenticates at `/signin`
+4. **Session:** Supabase creates a JWT token stored in cookies
+5. **Authorization:** Protected API routes verify the JWT
+6. **Wallet Access:** User can add wallets via `/api/wallets`
+
+## Protected Routes
+
+The following pages require authentication:
+
+- `/dashboard` - Main dashboard with wallet overview
+- `/chat` - Chat interface for natural language queries
+- All `/api/*` routes (except `/api/healthz`)
+
+## API Authentication
+
+Cogniflow uses Supabase's cookie-based session management:
+
+```typescript
+import { createServerClient } from '@supabase/ssr'
+
+const supabase = createServerClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  { cookies: /* cookie handlers */ }
+)
+
+const { data: { user } } = await supabase.auth.getUser()
+
+if (!user) {
+  return new Response('Unauthorized', { status: 401 })
+}
+```
+
+## Background Job Authentication
+
+Scheduled ingestion jobs (`/api/ingest`, `/api/prices`, `/api/embeddings`) use Bearer token authentication:
+
+```bash
+Authorization: Bearer <INGESTION_SECRET>
+```
+
+Set `INGESTION_SECRET` in your environment:
+
+```bash
+# Generate a secure random secret
+openssl rand -hex 32
+
+# Add to .env
+INGESTION_SECRET="your_generated_secret"
+```
+
+## Production Checklist
+
+<Steps>
+  <Step title="Enable email confirmations">
+    Require users to verify their email addresses before accessing the platform.
+  </Step>
+
+  <Step title="Configure production SMTP">
+    Use a reliable email service (SendGrid, AWS SES, Postmark) for transactional emails.
+  </Step>
+
+  <Step title="Add production redirect URLs">
+    Include your production domain in Supabase **URL Configuration**.
+  </Step>
+
+  <Step title="Set up OAuth providers">
+    Configure Google, GitHub, or other OAuth apps with production callback URLs.
+  </Step>
+
+  <Step title="Secure INGESTION_SECRET">
+    Use a cryptographically secure random string and store it in Vercel environment variables.
+  </Step>
+
+  <Step title="Enable rate limiting">
+    Configure Supabase rate limits in **Settings → Auth → Rate Limits**.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### "Email not confirmed" error
+
+- Check if email confirmation is enabled in Supabase
+- Verify SMTP is configured correctly
+- Check spam folder for verification emails
+- Temporarily disable confirmations for testing
+
+### OAuth redirect mismatch
+
+- Ensure callback URLs match exactly: `https://[project-id].supabase.co/auth/v1/callback`
+- Check for trailing slashes or protocol mismatches
+- Verify OAuth app is approved (Google requires review for production)
+
+### Session expires immediately
+
+- Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set
+- Check browser cookies are enabled
+- Ensure Site URL is configured in Supabase
+
+### Unauthorized API responses
+
+- Confirm user is signed in: check `supabase.auth.getUser()`
+- Verify JWT token is valid and not expired
+- Check Row Level Security policies in Supabase (if enabled)
+
+## Next Steps
+
+- Review [Database Configuration](/setup/database) to understand the Prisma schema
+- Explore [Environment Variables](/setup/environment-variables) for additional auth settings
+- Deploy to production with proper OAuth and SMTP configuration

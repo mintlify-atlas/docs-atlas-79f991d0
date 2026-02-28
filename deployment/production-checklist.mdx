@@ -1,0 +1,317 @@
+---
+title: Production Checklist
+description: Pre-launch security, monitoring, and performance checklist for deploying Cogniflow to production
+---
+
+Before launching Cogniflow to production, review this checklist to ensure your deployment is secure, monitored, and performant.
+
+## Security
+
+<AccordionGroup>
+  <Accordion title="Environment variables and secrets">
+    <Checklist>
+      - [ ] `INGESTION_SECRET` is a strong random value (at least 32 characters)
+      - [ ] `INGESTION_SECRET` is never committed to version control
+      - [ ] All secrets are stored in Vercel environment variables (not in code)
+      - [ ] `DATABASE_URL` and `DIRECT_URL` use SSL connections (`?sslmode=require`)
+      - [ ] `OPENAI_API_KEY` and `COINGECKO_API_KEY` are valid and have appropriate rate limits
+    </Checklist>
+
+    <Warning>
+      Generate strong secrets with: `openssl rand -base64 32`
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Database security">
+    <Checklist>
+      - [ ] Supabase Postgres is configured with connection pooling (pgbouncer)
+      - [ ] Database password is strong and unique
+      - [ ] Row-Level Security (RLS) policies are enabled for user-facing tables
+      - [ ] Service role key is not exposed in client-side code
+      - [ ] Database backups are enabled in Supabase dashboard
+    </Checklist>
+
+    Review Supabase security settings:
+    1. Go to **Settings → Database → Connection pooling**
+    2. Verify `DATABASE_URL` uses the pooler (port 6543)
+    3. Use `DIRECT_URL` for migrations (port 5432)
+  </Accordion>
+
+  <Accordion title="Authentication and authorization">
+    <Checklist>
+      - [ ] Supabase Auth providers are enabled (Email, Google, etc.)
+      - [ ] Production domain is added to Supabase **Redirect URLs**
+      - [ ] Email confirmations are enabled or SMTP is configured
+      - [ ] OAuth client IDs/secrets are set for production domains
+      - [ ] Session expiry and refresh tokens are configured appropriately
+      - [ ] API routes that access user data check authentication via Supabase client
+    </Checklist>
+
+    <Warning>
+      If email confirmations are enabled, you must configure SMTP in Supabase:
+      - Go to **Authentication → Providers → Email**
+      - Configure SMTP settings or use Supabase's email service
+    </Warning>
+  </Accordion>
+
+  <Accordion title="API endpoint protection">
+    <Checklist>
+      - [ ] `/api/ingest`, `/api/prices`, `/api/embeddings` require bearer token auth
+      - [ ] Background job endpoints return 401 for missing/invalid tokens
+      - [ ] Public API routes (e.g., `/api/transfers`) validate user authentication
+      - [ ] Rate limiting is enabled (Vercel Pro+ or external middleware)
+      - [ ] CORS is configured to allow only your frontend domain
+    </Checklist>
+
+    Test authentication:
+    ```bash
+    # Should return 401 Unauthorized
+    curl -X POST https://your-app.vercel.app/api/ingest
+
+    # Should succeed
+    curl -X POST https://your-app.vercel.app/api/ingest \
+      -H "Authorization: Bearer YOUR_SECRET"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Infrastructure
+
+<AccordionGroup>
+  <Accordion title="Vercel configuration">
+    <Checklist>
+      - [ ] Production environment variables are set in Vercel dashboard
+      - [ ] Preview environment uses separate database/keys (optional but recommended)
+      - [ ] Custom domain is configured with SSL (automatic via Vercel)
+      - [ ] Vercel Cron jobs are scheduled for `/api/ingest`, `/api/prices`, `/api/embeddings`
+      - [ ] Function timeouts are appropriate for job duration (Pro+ plans)
+      - [ ] Edge config or environment variable overrides are documented
+    </Checklist>
+
+    Verify deployment:
+    1. Visit `https://your-app.vercel.app/api/healthz`
+    2. Should return `{"status":"ok"}` if database is reachable
+  </Accordion>
+
+  <Accordion title="Database and migrations">
+    <Checklist>
+      - [ ] Prisma schema matches production database
+      - [ ] All migrations are applied: `npx prisma migrate deploy`
+      - [ ] `prisma/migrations/` directory is committed to version control
+      - [ ] Database has sufficient storage and connection limits for traffic
+      - [ ] pgvector extension is installed for semantic search
+      - [ ] Indexes exist on frequently queried columns (e.g., `address`, `chain`, `txHash`)
+    </Checklist>
+
+    Run migrations before first deploy:
+    ```bash
+    DATABASE_URL="your-production-url" npx prisma migrate deploy
+    ```
+  </Accordion>
+
+  <Accordion title="External dependencies">
+    <Checklist>
+      - [ ] Ethereum RPC provider (Alchemy/Infura) has sufficient request limits
+      - [ ] OpenAI API key has appropriate usage quotas for embeddings
+      - [ ] CoinGecko API key (if Pro) is configured for higher rate limits
+      - [ ] RPC retry logic is enabled (`RPC_MAX_RETRIES`, `RPC_RETRY_BASE_MS`)
+      - [ ] Fallback RPC providers are configured (optional but recommended)
+    </Checklist>
+
+    Environment variables:
+    ```bash
+    ETH_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+    RPC_MAX_RETRIES="5"
+    RPC_RETRY_BASE_MS="300"
+    RPC_RETRY_MAX_MS="4500"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Monitoring
+
+<AccordionGroup>
+  <Accordion title="Logging and observability">
+    <Checklist>
+      - [ ] Vercel logs are enabled and accessible in dashboard
+      - [ ] `LOG_LEVEL` is set to `info` or `warn` (avoid `debug` in production)
+      - [ ] Critical errors are logged with stack traces
+      - [ ] Background job results are logged (`/api/ingest`, `/api/prices`, `/api/embeddings`)
+      - [ ] Integration with external logging service (optional: Datadog, Sentry, LogDNA)
+    </Checklist>
+
+    Set logging environment variable:
+    ```bash
+    LOG_LEVEL="info"
+    ```
+  </Accordion>
+
+  <Accordion title="Error tracking">
+    <Checklist>
+      - [ ] Sentry or similar error tracking is configured (optional but recommended)
+      - [ ] Frontend errors are captured and reported
+      - [ ] API errors return meaningful status codes and messages
+      - [ ] Database connection errors are handled gracefully
+      - [ ] RPC errors are retried with exponential backoff
+    </Checklist>
+
+    Install Sentry (optional):
+    ```bash
+    npm install @sentry/nextjs -w web
+    npx @sentry/wizard@latest -i nextjs
+    ```
+  </Accordion>
+
+  <Accordion title="Performance monitoring">
+    <Checklist>
+      - [ ] Vercel Analytics is enabled (Pro+ plan)
+      - [ ] Slow database queries are identified and optimized
+      - [ ] API response times are monitored
+      - [ ] Background job execution duration is tracked
+      - [ ] RPC request latency is acceptable (< 2s per request)
+    </Checklist>
+
+    Monitor job performance:
+    - Check Vercel logs for `durationMs` in job responses
+    - Optimize `INGESTION_MAX_PAGES` and batch sizes if jobs timeout
+  </Accordion>
+
+  <Accordion title="Alerting">
+    <Checklist>
+      - [ ] Vercel deployment failures trigger alerts (email/Slack)
+      - [ ] Background job failures are monitored (check cron logs)
+      - [ ] Database connection errors are alerted
+      - [ ] RPC provider downtime is detected and alerted
+      - [ ] OpenAI API quota exhaustion is monitored
+    </Checklist>
+
+    Configure Vercel notifications:
+    1. Go to **Project Settings → Notifications**
+    2. Enable email or Slack alerts for deployment failures
+  </Accordion>
+</AccordionGroup>
+
+## Performance
+
+<AccordionGroup>
+  <Accordion title="Frontend optimization">
+    <Checklist>
+      - [ ] Next.js production build is optimized (`next build`)
+      - [ ] Images are optimized with Next.js Image component
+      - [ ] Static assets are cached with appropriate headers
+      - [ ] API routes use efficient database queries (no N+1 queries)
+      - [ ] Client-side data fetching uses SWR or React Query for caching
+    </Checklist>
+
+    Verify production build:
+    ```bash
+    npm run build -w web
+    ```
+  </Accordion>
+
+  <Accordion title="Database optimization">
+    <Checklist>
+      - [ ] Indexes exist on `wallets(address, chain)`, `transfers(txHash, logIndex)`, `tokens(address, chain)`
+      - [ ] Connection pooling is enabled (pgbouncer)
+      - [ ] Queries use `LIMIT` and pagination to avoid large result sets
+      - [ ] Slow query log is enabled in Supabase dashboard
+      - [ ] Database size is monitored (Supabase free tier: 500MB limit)
+    </Checklist>
+
+    Check database size:
+    ```sql
+    SELECT pg_size_pretty(pg_database_size('postgres')) AS size;
+    ```
+  </Accordion>
+
+  <Accordion title="Background job tuning">
+    <Checklist>
+      - [ ] `INGESTION_BATCH_SIZE` is tuned for your wallet count (start with `1`)
+      - [ ] `INGESTION_MAX_PAGES` prevents timeouts (default `8` = ~2000 transfers)
+      - [ ] `INGESTION_SKIP_RECENT_MS` avoids redundant syncs (default 10 minutes)
+      - [ ] Price update frequency matches CoinGecko rate limits (hourly for free tier)
+      - [ ] Embeddings batch size fits within OpenAI token limits (default `32`)
+    </Checklist>
+
+    Environment variables:
+    ```bash
+    INGESTION_BATCH_SIZE="1"
+    INGESTION_MAX_PAGES="8"
+    INGESTION_MAX_BLOCK_SPAN="50000"
+    INGESTION_SKIP_RECENT_MS="600000"
+    PRICE_BATCH_SIZE="1"
+    EMBEDDING_BATCH_SIZE="32"
+    EMBEDDING_DIM="768"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Testing
+
+<Checklist>
+  - [ ] Sign up flow works (email confirmation, OAuth)
+  - [ ] Sign in with email/password succeeds
+  - [ ] OAuth sign in with Google/GitHub succeeds (if enabled)
+  - [ ] Dashboard loads and displays wallet data
+  - [ ] Wallet ingestion completes successfully
+  - [ ] Transfers API returns paginated results
+  - [ ] Portfolio API returns balances and USD values
+  - [ ] Chat endpoint executes SQL tools and returns answers
+  - [ ] Semantic search works after embeddings job runs
+  - [ ] Background jobs execute on schedule (check Vercel cron logs)
+  - [ ] Manual job triggers succeed with correct auth header
+</Checklist>
+
+## Documentation
+
+<Checklist>
+  - [ ] README.md includes production deployment instructions
+  - [ ] Environment variables are documented in `.env.example`
+  - [ ] API endpoints are documented with request/response examples
+  - [ ] Database schema is documented (Prisma schema serves as source of truth)
+  - [ ] Background job schedules are documented
+  - [ ] Runbook exists for common issues (RPC failures, DB connection errors, etc.)
+</Checklist>
+
+## Compliance and Legal
+
+<Checklist>
+  - [ ] Privacy policy is published (if collecting user data)
+  - [ ] Terms of service are published
+  - [ ] Cookie consent banner is displayed (if required by jurisdiction)
+  - [ ] GDPR compliance is addressed (if serving EU users)
+  - [ ] User data deletion endpoint exists (if required)
+  - [ ] OpenAI/CoinGecko API terms of service are reviewed and followed
+</Checklist>
+
+## Post-Launch
+
+After deploying to production:
+
+1. **Monitor the first 24 hours**
+   - Watch Vercel logs for errors
+   - Check background job execution in Cron tab
+   - Verify wallet ingestion completes successfully
+   - Monitor database connection pool usage
+
+2. **Set up regular reviews**
+   - Weekly: Review error logs and fix critical issues
+   - Monthly: Check API usage and costs (OpenAI, CoinGecko, RPC providers)
+   - Quarterly: Audit security settings and update dependencies
+
+3. **Scale as needed**
+   - Upgrade Vercel plan if hitting function timeout or cron limits
+   - Upgrade Supabase plan if exceeding database size or connection limits
+   - Upgrade RPC provider plan if hitting rate limits
+   - Optimize database queries if response times degrade
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Deploy to Vercel" icon="rocket" href="/deployment/vercel">
+    Return to the Vercel deployment guide
+  </Card>
+  <Card title="Background Jobs" icon="clock" href="/deployment/background-jobs">
+    Configure scheduled jobs for ingestion and updates
+  </Card>
+</CardGroup>

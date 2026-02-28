@@ -1,0 +1,269 @@
+---
+title: Contributing
+description: Guidelines for contributing to Cogniflow
+---
+
+Thank you for considering contributing to Cogniflow! This guide will help you get started with development and submitting pull requests.
+
+## Development setup
+
+### Prerequisites
+
+- **Node.js** 18+ and npm
+- **PostgreSQL** 14+ with pgvector extension
+- **Supabase** account (or local Supabase instance)
+- **Ethereum RPC** access (Alchemy, Infura, or local node)
+- **OpenAI API** key (for embeddings)
+
+### Clone and install
+
+```bash
+git clone https://github.com/devaanshsinha/cogniflow.git
+cd cogniflow
+npm install
+```
+
+### Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Fill in required variables (see [Environment variables](/setup/environment-variables)).
+
+### Set up database
+
+```bash
+npx prisma migrate dev
+npx prisma generate
+```
+
+### Run development server
+
+```bash
+npm run dev -w web
+```
+
+Visit http://localhost:3000
+
+## Code style
+
+### Linting
+
+Before submitting a PR, run ESLint:
+
+```bash
+npm run lint -w web
+```
+
+Fix auto-fixable issues:
+
+```bash
+npm run lint -w web -- --fix
+```
+
+### Formatting
+
+Cogniflow follows standard TypeScript conventions:
+
+- **2 spaces** for indentation
+- **Double quotes** for strings
+- **Semicolons** required
+- **Trailing commas** in multiline objects/arrays
+
+### File naming
+
+- Components: `PascalCase.tsx`
+- Utilities: `camelCase.ts`
+- API routes: `route.ts` (Next.js convention)
+
+## Commit messages
+
+Use clear, descriptive commit messages:
+
+```
+✅ Good:
+feat: add semantic search to chat interface
+fix: handle missing token decimals in transfers
+chore: upgrade Prisma to 6.17.0
+
+❌ Bad:
+update stuff
+fixes
+WIP
+```
+
+**Format:**
+
+```
+<type>: <short description>
+
+<optional body>
+```
+
+**Types:**
+- `feat` - New feature
+- `fix` - Bug fix
+- `docs` - Documentation changes
+- `chore` - Dependency updates, tooling
+- `refactor` - Code restructuring
+- `test` - Test additions/changes
+
+## Pull request process
+
+### 1. Create a branch
+
+```bash
+git checkout -b feat/my-new-feature
+```
+
+### 2. Make changes
+
+- Keep changes focused (one feature/fix per PR)
+- Add tests if applicable
+- Update documentation for user-facing changes
+
+### 3. Test locally
+
+```bash
+# Run linter
+npm run lint -w web
+
+# Test the app
+npm run dev -w web
+
+# Run worker scripts
+npm run start -w worker
+```
+
+### 4. Commit and push
+
+```bash
+git add .
+git commit -m "feat: add new feature"
+git push origin feat/my-new-feature
+```
+
+### 5. Open a pull request
+
+- Go to https://github.com/devaanshsinha/cogniflow/pulls
+- Click "New pull request"
+- Select your branch
+- Fill in the PR template:
+  - **Description:** What does this PR do?
+  - **Motivation:** Why is this change needed?
+  - **Testing:** How did you test it?
+  - **Screenshots:** (if UI changes)
+
+### 6. Address review feedback
+
+Maintainers may request changes. Update your branch and push:
+
+```bash
+git add .
+git commit -m "fix: address review feedback"
+git push
+```
+
+## Development guidelines
+
+### Worker scripts
+
+- Keep workers **idempotent** (safe to run multiple times)
+- Use **upserts** instead of inserts (keyed by `txHash:logIndex`)
+- Log errors with **pino** for structured logging
+
+### API routes
+
+- Validate inputs with **Zod schemas**
+- Use **Prisma** for database queries (never raw SQL with user input)
+- Return consistent error shapes:
+  ```json
+  { "error": "Message", "code": "ERROR_CODE" }
+  ```
+
+### LLM tools
+
+- Prefer **named queries** over arbitrary SQL
+- Validate all parameters with Zod
+- Never allow `INSERT`, `UPDATE`, or `DELETE` in tools
+
+### Database migrations
+
+When changing the Prisma schema:
+
+```bash
+npx prisma migrate dev --name describe_change
+npx prisma generate
+```
+
+Commit the migration files in `prisma/migrations/`.
+
+<Warning>
+  Never edit migration files directly. Always use `prisma migrate dev`.
+</Warning>
+
+## Testing
+
+Cogniflow doesn't currently have automated tests, but manual testing is expected:
+
+### Web app
+
+- [ ] Sign up and sign in work
+- [ ] Adding a wallet triggers ingestion
+- [ ] Dashboard shows transfers and portfolio data
+- [ ] Chat responds to queries
+- [ ] Semantic search returns relevant results
+
+### Worker scripts
+
+- [ ] `npm run start -w worker` syncs transfers
+- [ ] `npm run start:prices -w worker` fetches prices
+- [ ] `npm run start:embeddings -w worker` generates embeddings
+
+### API endpoints
+
+Test with curl:
+
+```bash
+# Health check
+curl http://localhost:3000/api/healthz
+
+# Get transfers
+curl "http://localhost:3000/api/transfers?address=0x123...&chain=eth"
+
+# Get portfolio
+curl "http://localhost:3000/api/portfolio?address=0x123...&chain=eth&days=7"
+```
+
+## Documentation
+
+When adding features, update:
+
+- **README.md** - If setup steps change
+- **API docs** - For new endpoints
+- **Environment variables** - For new config options
+
+## Community
+
+- **GitHub Issues:** Report bugs or suggest features
+- **Discussions:** Ask questions or share ideas
+
+## Code of conduct
+
+Be respectful and constructive in all interactions. Cogniflow is an open-source project and everyone is welcome to contribute.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the same license as the project.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand the system design
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/dev/troubleshooting">
+    Common issues and solutions
+  </Card>
+</CardGroup>

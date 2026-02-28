@@ -1,80 +1,479 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Cogniflow running locally in 5 minutes with a demo wallet
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Before you begin, ensure you have:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Node.js" icon="node-js">
+    Node.js 18+ installed ([download here](https://nodejs.org/))
+  </Card>
+  <Card title="Package Manager" icon="box">
+    npm (included with Node.js)
+  </Card>
+  <Card title="Database" icon="database">
+    Supabase account for Postgres + pgvector ([sign up free](https://supabase.com))
+  </Card>
+  <Card title="RPC Access" icon="link">
+    Alchemy or Infura API key ([Alchemy](https://www.alchemy.com/) or [Infura](https://infura.io/))
+  </Card>
 </CardGroup>
 
+## Installation
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the Cogniflow source code to your local machine:
+
+    ```bash
+    git clone https://github.com/your-org/cogniflow.git
+    cd cogniflow
+    ```
+
+    <Note>
+      Replace `your-org` with the actual GitHub organization or username.
+    </Note>
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install all workspace dependencies from the monorepo root:
+
+    ```bash
+    npm install
+    ```
+
+    This installs dependencies for both the `web/` and `worker/` workspaces using npm workspaces.
+
+    <Info>
+      The project uses a shared lockfile at the root level. Always run `npm install` from the root directory.
+    </Info>
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Copy the example environment file and update it with your credentials:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Open `.env` in your editor and configure the following required variables:
+
+    ```bash .env
+    # Database (from Supabase project settings)
+    DATABASE_URL="postgresql://postgres:[password]@[host]:5432/postgres"
+    DIRECT_URL="postgresql://postgres:[password]@[host]:5432/postgres"
+
+    # Supabase Auth (from Supabase project settings → API)
+    NEXT_PUBLIC_SUPABASE_URL="https://[project-id].supabase.co"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="[your-anon-key]"
+
+    # Ethereum RPC (from Alchemy or Infura)
+    ETH_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/[your-api-key]"
+    # OR
+    ALCHEMY_API_KEY="[your-key]"
+    INFURA_API_KEY="[your-key]"
+
+    # Explorer (set to Sepolia if using testnet)
+    NEXT_PUBLIC_ETHERSCAN_BASE_URL="https://etherscan.io"
+
+    # Optional: OpenAI for semantic search
+    OPENAI_API_KEY="[your-key]"
+    ```
+
+    <Warning>
+      Keep your `.env` file secure and never commit it to version control. The `.gitignore` is already configured to exclude it.
+    </Warning>
+  </Step>
+
+  <Step title="Set Up Supabase Authentication">
+    Configure Supabase Auth to work with your local development environment:
+
+    1. Go to your Supabase dashboard → **Authentication** → **URL Configuration**
+    2. Add `http://localhost:3000` to the **Site URL** and **Redirect URLs**
+    3. Enable **Email/Password** provider under **Authentication** → **Providers**
+    4. (Optional) Disable "Confirm email" for faster development
+    5. (Optional) Enable **Google** OAuth and configure callback URLs
+
+    <Tip>
+      For local development, disabling email confirmation speeds up testing. Re-enable it in production.
+    </Tip>
+  </Step>
+
+  <Step title="Set Up the Database">
+    Run Prisma migrations to create the database schema:
+
+    ```bash
+    npx prisma migrate dev
+    ```
+
+    This creates the following tables:
+    - `blocks` - Ethereum block headers
+    - `transfers` - ERC-20 transfer events
+    - `prices` - USD price snapshots
+    - `tx_embeddings` - Vector embeddings for semantic search
+    - `users` - Authenticated users
+    - `wallets` - User-owned wallet addresses
+
+    <Note>
+      The first migration will also enable the `pgvector` extension if not already enabled in Supabase.
+    </Note>
+  </Step>
+
+  <Step title="Generate Prisma Client">
+    Generate the Prisma client types:
+
+    ```bash
+    npx prisma generate
+    ```
+
+    This creates TypeScript types for database queries used throughout the app.
+  </Step>
+</Steps>
+
+## Running the Application
+
+<Steps>
+  <Step title="Start the Development Server">
+    Launch the Next.js web app:
+
+    ```bash
+    npm run dev -w web
+    ```
+
+    The app will be available at **http://localhost:3000**
+
+    <Check>
+      You should see the Next.js compilation output in your terminal.
+    </Check>
+  </Step>
+
+  <Step title="Sign Up for an Account">
+    Navigate to **http://localhost:3000/signup** and create an account:
+
+    - Enter your email and password
+    - Click "Sign up"
+    - If email confirmation is enabled, check your inbox and click the confirmation link
+    - Return to **http://localhost:3000/signin** and log in
+
+    <Info>
+      The demo address `0xabc123abc123abc123abc123abc123abc123abc1` is used by default for testing.
+    </Info>
+  </Step>
+
+  <Step title="Load a Demo Wallet">
+    Once signed in, you'll see the dashboard:
+
+    1. The address input is pre-filled with a demo address
+    2. Click **"Load activity"** to trigger ingestion
+    3. Wait for the sync to complete (status shows in the UI)
+
+    <Note>
+      The first sync may take a minute depending on RPC rate limits and the number of transfers.
+    </Note>
+  </Step>
+
+  <Step title="Explore the Dashboard">
+    After ingestion completes, explore the features:
+
+    - **Summary Cards**: Total transfers, counterparties, net USD value
+    - **Latest Transfers**: Most recent 25 transfers with timestamps and Etherscan links
+    - **Top Holdings**: Net token positions ranked by priced value
+    - **Chat Panel**: Ask natural language questions about the wallet
+
+    Try asking: _"What were the largest transfers last week?"_
+  </Step>
+</Steps>
+
+## Testing the API
+
+You can also interact with Cogniflow programmatically via REST APIs:
+
+### Health Check
+
+Verify database connectivity:
+
+```bash
+curl http://localhost:3000/api/healthz
+```
+
+<CodeGroup>
+```json Response (Success)
+{
+  "status": "ok"
+}
+```
+
+```json Response (Error)
+{
+  "status": "error",
+  "message": "database_unreachable"
+}
+```
+</CodeGroup>
+
+### Portfolio Data
+
+Fetch aggregated portfolio metrics:
+
+```bash
+curl "http://localhost:3000/api/portfolio?address=0xabc123...&chain=eth&days=7"
+```
+
+<CodeGroup>
+```json Response
+{
+  "status": "ok",
+  "data": {
+    "address": "0xabc123abc123abc123abc123abc123abc123abc1",
+    "chain": "eth",
+    "windowDays": 7,
+    "sync": {
+      "lastSyncedBlock": 18500000,
+      "lastSyncedAt": "2024-01-15T12:00:00.000Z"
+    },
+    "valuations": {
+      "incomingUsd": "15000.50",
+      "outgoingUsd": "12000.00",
+      "netUsd": "3000.50"
+    },
+    "totals": {
+      "transfers": 42,
+      "incomingTransfers": 28,
+      "outgoingTransfers": 14,
+      "counterparties": 12
+    },
+    "holdings": [
+      {
+        "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+        "symbol": "USDT",
+        "decimals": 6,
+        "incoming": "15000.00",
+        "outgoing": "10000.00",
+        "net": "5000.00",
+        "priceUsd": "1.00",
+        "netUsd": "5000.00"
+      }
+    ]
+  }
+}
+```
+</CodeGroup>
+
+### Transfer History
+
+Query transfer events with pagination:
+
+```bash
+curl "http://localhost:3000/api/transfers?address=0xabc123...&chain=eth&limit=25"
+```
+
+<CodeGroup>
+```json Response
+{
+  "status": "ok",
+  "data": [
+    {
+      "id": "0x123...abc:42",
+      "timestamp": "2024-01-15T10:30:00.000Z",
+      "txHash": "0x123...abc",
+      "token": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+      "from": "0x123...",
+      "to": "0xabc123abc123abc123abc123abc123abc123abc1",
+      "amount": "1000.00",
+      "symbol": "USDT",
+      "chain": "eth",
+      "amountUsd": "1000.00",
+      "priceUsd": "1.00"
+    }
+  ],
+  "nextCursor": "cursor-string",
+  "hasMore": true,
+  "sync": {
+    "lastSyncedBlock": 18500000,
+    "lastSyncedAt": "2024-01-15T12:00:00.000Z"
+  }
+}
+```
+</CodeGroup>
+
+<Tip>
+  See the full [API Reference](/api-reference) for all available endpoints and parameters.
+</Tip>
+
+## Running Background Jobs
+
+For continuous data updates, run the worker jobs:
+
+### Manual Ingestion
+
+Ingest transfers for all tracked wallets:
+
+```bash
+npm run start -w worker
+```
+
+### Price Enrichment
+
+Fetch USD prices from CoinGecko:
+
+```bash
+npm run start:prices -w worker
+```
+
+### Generate Embeddings
+
+Create vector embeddings for semantic search:
+
+```bash
+npm run start:embeddings -w worker
+```
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  In production, these jobs are scheduled via Vercel Cron or another scheduler. See the [Deployment guide](/deployment) for details.
 </Note>
+
+## Code Overview
+
+Key files from the source code:
+
+### Prisma Client Setup
+
+The Prisma client is initialized in `web/lib/prisma.ts`:
+
+```typescript web/lib/prisma.ts
+import prisma from "../../shared/prisma";
+
+export { prisma };
+
+export default prisma;
+```
+
+### Health Check Endpoint
+
+Verify database connectivity at `web/app/api/healthz/route.ts`:
+
+```typescript web/app/api/healthz/route.ts
+import { NextResponse } from "next/server";
+import prisma from "@/lib/prisma";
+
+export async function GET() {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return NextResponse.json({ status: "ok" });
+  } catch (error) {
+    console.error("health check failed", error);
+    return NextResponse.json(
+      { status: "error", message: "database_unreachable" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Worker Indexer
+
+The indexer ingests transfers for all wallets in `worker/src/indexer.ts`:
+
+```typescript worker/src/indexer.ts
+import "dotenv/config";
+import pino from "pino";
+import prisma, { disconnectPrisma } from "../../shared/prisma";
+import { syncWalletTransfers } from "../../shared/ingestion/syncWalletTransfers";
+
+const log = pino({ level: process.env.LOG_LEVEL || "info" });
+
+async function main() {
+  log.info("Indexer booting...");
+  const [ping] =
+    await prisma.$queryRaw<{ result: number }[]>`SELECT 1 AS result`;
+  log.info({ dbPing: ping?.result ?? 0 }, "Database connectivity verified");
+
+  const targetChain = process.env.ETH_CHAIN ?? "eth";
+  const wallets = await prisma.wallet.findMany({
+    where: { chain: targetChain },
+  });
+
+  if (wallets.length === 0) {
+    log.warn({ chain: targetChain }, "No wallets registered for ingestion");
+    return;
+  }
+
+  for (const wallet of wallets) {
+    const childLog = log.child({ wallet: wallet.address, chain: wallet.chain });
+    try {
+      await syncWalletTransfers(wallet, childLog);
+    } catch (error) {
+      childLog.error({ err: error }, "Failed to sync wallet");
+    }
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Architecture Overview"
+    icon="diagram-project"
+    href="architecture"
+  >
+    Learn how the web app, worker, and database interact
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/overview"
+  >
+    Explore all available endpoints and parameters
+  </Card>
+  <Card
+    title="Deployment Guide"
+    icon="rocket"
+    href="/deployment/vercel"
+  >
+    Deploy to Vercel with scheduled jobs
+  </Card>
+  <Card
+    title="Configuration"
+    icon="gear"
+    href="/setup/environment-variables"
+  >
+    Customize RPC settings, sync windows, and more
+  </Card>
+</CardGroup>
+
+<Check>
+  **Congratulations!** You've successfully set up Cogniflow locally. Try connecting different Ethereum addresses or exploring the chat interface.
+</Check>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection fails" icon="database">
+    - Verify `DATABASE_URL` and `DIRECT_URL` are correct in `.env`
+    - Check that your Supabase project is active and not paused
+    - Ensure pgvector extension is enabled (run `CREATE EXTENSION IF NOT EXISTS vector;` in Supabase SQL editor)
+  </Accordion>
+
+  <Accordion title="RPC rate limit errors" icon="triangle-exclamation">
+    - Reduce `INGESTION_BATCH_SIZE` and `INGESTION_MAX_PAGES` in `.env`
+    - Increase `RPC_RETRY_BASE_MS` to slow down requests
+    - Upgrade to a higher Alchemy/Infura tier
+  </Accordion>
+
+  <Accordion title="Auth redirect errors" icon="lock">
+    - Confirm `http://localhost:3000` is added to Supabase redirect URLs
+    - Clear browser cookies and try signing in again
+    - Check that `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` match your project
+  </Accordion>
+
+  <Accordion title="Transfers not appearing" icon="circle-question">
+    - Ensure the wallet has ERC-20 transfers (check on Etherscan)
+    - Verify `ETH_RPC_URL` points to the correct network (mainnet vs Sepolia)
+    - Check `ETH_LOOKBACK_BLOCKS` to ensure sufficient history is indexed
+    - Look for errors in the terminal output during ingestion
+  </Accordion>
+</AccordionGroup>

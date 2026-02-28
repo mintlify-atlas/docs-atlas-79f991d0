@@ -1,0 +1,195 @@
+---
+title: Monorepo structure
+description: Understanding Cogniflow's workspace layout and package organization
+---
+
+Cogniflow is organized as an npm workspaces monorepo, with separate packages for the web application, worker processes, and shared utilities.
+
+## Workspace layout
+
+```
+cogniflow/
+├── web/                # Next.js application
+├── worker/             # Background indexer and jobs
+├── shared/             # Shared utilities (optional)
+├── prisma/             # Database schema and migrations
+├── package.json        # Root workspace configuration
+└── package-lock.json   # Lockfile for all workspaces
+```
+
+## Web workspace
+
+**Location:** `web/`
+
+**Purpose:** Next.js 15 application serving the dashboard, chat interface, and API routes
+
+**Key directories:**
+- `app/` - Next.js App Router pages and API routes
+  - `api/` - REST API endpoints for wallets, transfers, chat, search
+  - `signin/` - Authentication pages
+  - `signup/` - User registration
+- `components/` - React components (dashboard, UI elements)
+- `lib/` - Utilities, Prisma client, Supabase helpers, SQL tools
+- `public/` - Static assets
+
+**Dependencies:** (from `web/package.json`)
+
+```json
+{
+  "dependencies": {
+    "@prisma/client": "^6.17.0",
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.75.0",
+    "next": "15.5.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "zod": "^3.23.8"
+  }
+}
+```
+
+<Info>
+  The web workspace is deployed to **Vercel** as a serverless Next.js application.
+</Info>
+
+## Worker workspace
+
+**Location:** `worker/`
+
+**Purpose:** Background processes for blockchain indexing, price enrichment, and embedding generation
+
+**Key files:**
+- `src/indexer.ts` - Main ERC-20 transfer indexer
+- `src/jobs/updatePrices.ts` - CoinGecko price enrichment job
+- `src/jobs/updateEmbeddings.ts` - OpenAI embedding generation job
+
+**Scripts:** (from `worker/package.json`)
+
+```json
+{
+  "scripts": {
+    "start": "ts-node src/indexer.ts",
+    "start:prices": "ts-node src/jobs/updatePrices.ts",
+    "start:embeddings": "ts-node src/jobs/updateEmbeddings.ts"
+  }
+}
+```
+
+**Dependencies:**
+
+```json
+{
+  "dependencies": {
+    "@prisma/client": "^6.17.0",
+    "dotenv": "^17.2.3",
+    "pino": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "zod": "^4.1.12"
+  }
+}
+```
+
+<Warning>
+  Worker scripts are **not deployed** with the web app. They run via scheduled cron jobs or manual execution.
+</Warning>
+
+## Prisma workspace
+
+**Location:** `prisma/`
+
+**Purpose:** Database schema definitions and migrations
+
+**Key files:**
+- `schema.prisma` - Prisma schema for all database tables
+- `migrations/` - SQL migration history
+
+<Tip>
+  Run `npx prisma generate` after schema changes to update the Prisma client types used by both web and worker.
+</Tip>
+
+## Shared utilities
+
+While not explicitly defined as a workspace, shared code can be placed in a `shared/` directory:
+
+- `shared/prisma.ts` - Shared Prisma client instance
+- `shared/ingestion/` - Wallet sync logic
+- `shared/jobs/` - Job implementations (prices, embeddings)
+
+## Root configuration
+
+**Root `package.json`:**
+
+```json
+{
+  "name": "@cogniflow/root",
+  "private": true,
+  "workspaces": [
+    "web",
+    "worker"
+  ],
+  "devDependencies": {
+    "prisma": "^6.17.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.17.0"
+  }
+}
+```
+
+<Info>
+  The `workspaces` array tells npm to hoist dependencies and link packages together.
+</Info>
+
+## Development workflow
+
+### Installing dependencies
+
+From the root directory:
+
+```bash
+npm install
+```
+
+This installs dependencies for **all** workspaces.
+
+### Running workspace scripts
+
+```bash
+# Run web dev server
+npm run dev -w web
+
+# Run worker indexer
+npm run start -w worker
+
+# Run price job
+npm run start:prices -w worker
+```
+
+### Database migrations
+
+From the root directory:
+
+```bash
+# Create a new migration
+npx prisma migrate dev --name add_new_field
+
+# Generate Prisma client
+npx prisma generate
+```
+
+<Note>
+  Prisma commands run from the root automatically use `prisma/schema.prisma`.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Data model" icon="database" href="/dev/data-model">
+    Explore the Prisma schema and database tables
+  </Card>
+  <Card title="Indexer" icon="arrows-rotate" href="/dev/indexer">
+    Learn how the ERC-20 indexer works
+  </Card>
+</CardGroup>

@@ -1,0 +1,231 @@
+---
+title: Indexer
+description: How Cogniflow syncs ERC-20 transfers from Ethereum
+---
+
+The Cogniflow indexer is a Node.js worker that queries Ethereum nodes for ERC-20 `Transfer` events and stores them in the database.
+
+## Architecture
+
+The indexer lives in `worker/src/indexer.ts` and runs as a standalone script:
+
+```bash
+npm run start -w worker
+```
+
+### Key components
+
+1. **Wallet discovery** - Queries the database for wallets to track
+2. **Block range calculation** - Determines which blocks to fetch
+3. **RPC calls** - Fetches `Transfer` events from Ethereum nodes
+4. **Deduplication** - Prevents duplicate transfers via composite ID
+5. **Database upsert** - Stores transfers and updates wallet sync cursor
+
+## Source code walkthrough
+
+### Main indexer logic
+
+**File:** `worker/src/indexer.ts`
+
+```typescript
+import "dotenv/config";
+import pino from "pino";
+import prisma, { disconnectPrisma } from "../../shared/prisma";
+import { syncWalletTransfers } from "../../shared/ingestion/syncWalletTransfers";
+
+const log = pino({ level: process.env.LOG_LEVEL || "info" });
+
+async function main() {
+  log.info("Indexer booting...");
+  const [ping] =
+    await prisma.$queryRaw<{ result: number }[]>`SELECT 1 AS result`;
+  log.info({ dbPing: ping?.result ?? 0 }, "Database connectivity verified");
+
+  const targetChain = process.env.ETH_CHAIN ?? "eth";
+  const wallets = await prisma.wallet.findMany({
+    where: { chain: targetChain },
+  });
+
+  if (wallets.length === 0) {
+    log.warn({ chain: targetChain }, "No wallets registered for ingestion");
+    return;
+  }
+
+  for (const wallet of wallets) {
+    const childLog = log.child({ wallet: wallet.address, chain: wallet.chain });
+    try {
+      await syncWalletTransfers(wallet, childLog);
+    } catch (error) {
+      childLog.error({ err: error }, "Failed to sync wallet");
+    }
+  }
+}
+
+main()
+  .catch((err) => {
+    log.error({ err }, "Indexer crashed");
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await disconnectPrisma();
+    log.debug("Prisma client disconnected");
+  });
+```
+
+### How it works
+
+<Steps>
+  <Step title="Verify database connectivity">
+    The indexer runs a test query (`SELECT 1`) to ensure the database is reachable.
+  </Step>
+  
+  <Step title="Load wallets">
+    Queries the `wallets` table for all addresses on the target chain (default: `"eth"`).
+  </Step>
+  
+  <Step title="Sync each wallet">
+    For each wallet, calls `syncWalletTransfers()` which:
+    - Determines the block range to query (from `lastSyncedBlock` to current block)
+    - Fetches ERC-20 `Transfer` events via RPC
+    - Upserts transfers into the database
+    - Updates the wallet's `lastSyncedBlock` cursor
+  </Step>
+  
+  <Step title="Handle errors gracefully">
+    If a wallet sync fails, the error is logged but processing continues for remaining wallets.
+  </Step>
+</Steps>
+
+## Configuration
+
+The indexer is controlled by environment variables:
+
+<ParamField path="ETH_CHAIN" type="string" default="eth">
+  Blockchain identifier for the network to index
+</ParamField>
+
+<ParamField path="ETH_RPC_URL" type="string" required>
+  Ethereum JSON-RPC endpoint (e.g., Alchemy, Infura, or self-hosted node)
+</ParamField>
+
+<ParamField path="ETH_LOOKBACK_BLOCKS" type="number" default="5000">
+  Number of blocks to fetch on first sync when no cursor exists
+</ParamField>
+
+<ParamField path="RPC_MAX_RETRIES" type="number" default="5">
+  Maximum retry attempts for failed RPC calls
+</ParamField>
+
+<ParamField path="RPC_RETRY_BASE_MS" type="number" default="300">
+  Base delay in milliseconds for exponential backoff
+</ParamField>
+
+<ParamField path="RPC_RETRY_MAX_MS" type="number" default="4500">
+  Maximum delay cap for retry backoff
+</ParamField>
+
+## ERC-20 Transfer event
+
+The indexer queries for the standard ERC-20 `Transfer` event:
+
+```solidity
+event Transfer(address indexed from, address indexed to, uint256 value);
+```
+
+**Event signature (keccak256):**
+
+```
+0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+```
+
+## Block range strategy
+
+### Initial sync
+
+When a wallet has **no sync cursor** (`lastSyncedBlock` is `null`):
+
+1. Fetch the current block number from the RPC node
+2. Calculate starting block: `currentBlock - ETH_LOOKBACK_BLOCKS`
+3. Query transfers from starting block to current block
+
+### Incremental sync
+
+When a wallet **has a cursor**:
+
+1. Query transfers from `lastSyncedBlock + 1` to current block
+2. Limit the range to avoid RPC timeouts (e.g., 50,000 blocks per request)
+3. Update the cursor after each successful batch
+
+<Info>
+  The indexer is **idempotent**. Re-running it will not create duplicate transfers thanks to the composite ID (`txHash:logIndex`).
+</Info>
+
+## RPC error handling
+
+The indexer uses **exponential backoff** for transient RPC errors:
+
+1. Attempt RPC call
+2. On failure, wait `RPC_RETRY_BASE_MS * 2^attempt` (capped at `RPC_RETRY_MAX_MS`)
+3. Retry up to `RPC_MAX_RETRIES` times
+4. If all retries fail, throw an error
+
+<Tip>
+  Use Alchemy or Infura for production to avoid rate limits and downtime.
+</Tip>
+
+## Deduplication
+
+Transfers are uniquely identified by:
+
+```
+{txHash}:{logIndex}
+```
+
+This composite ID ensures:
+- No duplicate transfers from overlapping block ranges
+- Reorg-safe ingestion (same block can be re-indexed)
+
+## Deployment
+
+The indexer can be run:
+
+### Locally
+
+```bash
+npm run start -w worker
+```
+
+### Via API endpoint
+
+```bash
+curl -X POST https://your-app.vercel.app/api/ingest \
+  -H "Authorization: Bearer YOUR_INGESTION_SECRET"
+```
+
+### Scheduled cron job
+
+See [Background jobs](/deployment/background-jobs) for Vercel Cron configuration.
+
+## Monitoring
+
+The indexer logs key events:
+
+- Wallet sync started
+- Block range queried
+- Number of transfers fetched
+- Errors and retries
+
+<Warning>
+  If the indexer consistently fails with RPC errors, check your rate limits and consider upgrading your RPC provider plan.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Background jobs" icon="clock" href="/dev/background-jobs">
+    Learn about price and embedding jobs
+  </Card>
+  <Card title="Data model" icon="database" href="/dev/data-model">
+    Review the database schema
+  </Card>
+</CardGroup>

@@ -1,0 +1,183 @@
+---
+title: Deploy to Vercel
+description: Deploy the Cogniflow Next.js app to Vercel with environment variables and domain configuration
+---
+
+Cogniflow's web application is built with Next.js 15 and designed to deploy seamlessly to Vercel. This guide walks you through deploying the `web/` workspace to production.
+
+## Prerequisites
+
+Before deploying to Vercel, ensure you have:
+
+- A [Vercel account](https://vercel.com/signup)
+- A configured Supabase Postgres database with migrations applied
+- Supabase Auth enabled (email/password and/or OAuth providers)
+- An Ethereum RPC provider (Alchemy, Infura, or other)
+- OpenAI API key for chat and embeddings
+- CoinGecko API key (optional, for price enrichment)
+
+## Deployment Steps
+
+<Steps>
+  <Step title="Connect your repository">
+    1. Push your Cogniflow repository to GitHub, GitLab, or Bitbucket
+    2. Log in to [Vercel](https://vercel.com) and click **Add New Project**
+    3. Import your repository and select the `web` directory as the root
+    4. Vercel will auto-detect the Next.js framework
+  </Step>
+
+  <Step title="Configure environment variables">
+    In the Vercel project settings, add the following environment variables. All variables should be added for **Production**, **Preview**, and **Development** environments unless noted otherwise.
+
+    ### Required Variables
+
+    ```bash
+    # Database (Supabase Postgres)
+    DATABASE_URL="postgresql://user:pass@host:5432/database?pgbouncer=true"
+    DIRECT_URL="postgresql://user:pass@host:5432/database"
+
+    # Supabase Auth
+    NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
+
+    # Ethereum RPC
+    ETH_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+    ETH_CHAIN="eth"
+    ETH_LOOKBACK_BLOCKS="5000"
+
+    # OpenAI (for chat and embeddings)
+    OPENAI_API_KEY="sk-..."
+    OPENAI_BASE_URL="https://api.openai.com/v1"
+    EMBEDDING_MODEL="text-embedding-3-small"
+    EMBEDDING_CHAIN="eth"
+    EMBEDDING_BATCH_SIZE="32"
+    EMBEDDING_DIM="768"
+
+    # Public configuration
+    NEXT_PUBLIC_ETHERSCAN_BASE_URL="https://etherscan.io"
+    NEXT_PUBLIC_DEFAULT_CHAIN="eth"
+    ```
+
+    ### Security Variables
+
+    <Warning>
+      Generate a strong random secret for `INGESTION_SECRET`. This protects your background job endpoints from unauthorized access.
+    </Warning>
+
+    ```bash
+    # Background job authentication
+    INGESTION_SECRET="your-random-secret-here"
+    ```
+
+    Generate a secure secret with:
+    ```bash
+    openssl rand -base64 32
+    ```
+
+    ### Optional Variables
+
+    ```bash
+    # CoinGecko price enrichment
+    COINGECKO_API_KEY="CG-..."
+    PRICE_CHAIN="eth"
+    PRICE_BATCH_SIZE="1"
+
+    # Alternative RPC providers
+    ALCHEMY_API_KEY="your-key"
+    INFURA_API_KEY="your-key"
+
+    # Ingestion tuning
+    INGESTION_BATCH_SIZE="1"
+    INGESTION_MAX_PAGES="8"
+    INGESTION_MAX_BLOCK_SPAN="50000"
+    INGESTION_SKIP_RECENT_MS="600000"
+
+    # UI-triggered sync limits
+    UI_SYNC_MAX_PAGES="2"
+    UI_SYNC_LOOKBACK_BLOCKS="1500"
+    UI_SYNC_MIN_INTERVAL_MS="300000"
+
+    # RPC retry configuration
+    RPC_MAX_RETRIES="5"
+    RPC_RETRY_BASE_MS="300"
+    RPC_RETRY_MAX_MS="4500"
+
+    # Logging
+    LOG_LEVEL="info"
+    ```
+  </Step>
+
+  <Step title="Deploy the application">
+    Click **Deploy** in Vercel. The build process will:
+    1. Install dependencies with `npm install`
+    2. Generate Prisma Client with `npx prisma generate`
+    3. Build the Next.js app with `next build`
+    4. Deploy to Vercel's edge network
+
+    Monitor the build logs for any errors. First-time deploys typically take 2-3 minutes.
+  </Step>
+
+  <Step title="Configure custom domain (optional)">
+    1. Navigate to **Settings → Domains** in your Vercel project
+    2. Add your custom domain (e.g., `app.cogniflow.xyz`)
+    3. Configure DNS records as shown by Vercel:
+       - For apex domains: Add an `A` record pointing to Vercel's IP
+       - For subdomains: Add a `CNAME` record pointing to `cname.vercel-dns.com`
+    4. Wait for DNS propagation (usually 5-60 minutes)
+    5. Vercel automatically provisions SSL certificates via Let's Encrypt
+  </Step>
+
+  <Step title="Update Supabase redirect URLs">
+    After deploying, add your production domain to Supabase:
+    1. Open your [Supabase dashboard](https://app.supabase.com)
+    2. Go to **Authentication → URL Configuration**
+    3. Add your Vercel domain to **Redirect URLs**:
+       - `https://your-app.vercel.app`
+       - `https://your-custom-domain.com` (if using a custom domain)
+    4. Configure OAuth provider callback URLs if using Google/GitHub auth
+  </Step>
+</Steps>
+
+## Post-Deployment
+
+After your app is live:
+
+1. **Test authentication**: Visit `/signin` and verify email/OAuth login works
+2. **Verify database connectivity**: Check `GET /api/healthz` returns success
+3. **Set up background jobs**: Configure Vercel Cron to keep data fresh (see [Background Jobs](/deployment/background-jobs))
+4. **Review the production checklist**: Ensure security and monitoring are configured (see [Production Checklist](/deployment/production-checklist))
+
+## Environment Variables Reference
+
+You can view and update environment variables at any time:
+- Go to your Vercel project → **Settings → Environment Variables**
+- Changes require redeployment to take effect
+- Use different values for Production vs Preview environments if needed
+
+## Troubleshooting
+
+### Build fails with Prisma errors
+- Ensure `DATABASE_URL` and `DIRECT_URL` are set in environment variables
+- Verify your database is accessible from Vercel's IP ranges
+- Check that migrations have been applied: `npx prisma migrate deploy`
+
+### Authentication redirects fail
+- Confirm your production domain is added to Supabase **Redirect URLs**
+- Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are correct
+- Check Supabase logs for authentication errors
+
+### RPC rate limits
+- Upgrade your Alchemy/Infura plan for higher request limits
+- Adjust `RPC_MAX_RETRIES` and retry delays to handle transient failures
+- Consider using multiple RPC providers with fallback logic
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Background Jobs" icon="clock" href="/deployment/background-jobs">
+    Configure Vercel Cron to schedule ingestion, price updates, and embeddings
+  </Card>
+  <Card title="Production Checklist" icon="clipboard-check" href="/deployment/production-checklist">
+    Pre-launch security, monitoring, and performance checklist
+  </Card>
+</CardGroup>

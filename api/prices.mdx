@@ -1,0 +1,190 @@
+---
+title: Update Prices
+description: Background job to update token prices
+---
+
+## POST /api/prices
+
+Background job endpoint to update token price snapshots. Fetches current prices for tokens and stores them in the database.
+
+<Warning>
+  Requires bearer token authentication with `INGESTION_SECRET`. See [Authentication](/api/authentication) for details.
+</Warning>
+
+### Authentication
+
+```bash
+Authorization: Bearer YOUR_INGESTION_SECRET
+```
+
+### Request Body
+
+All fields are optional. Empty body uses default behavior.
+
+<ParamField body="chain" type="string">
+  Blockchain network to update prices for. Defaults to environment configuration
+</ParamField>
+
+<ParamField body="tokens" type="array">
+  Array of token addresses to update. If not specified, updates all tokens found in recent transfers
+</ParamField>
+
+<ParamField body="batchSize" type="number">
+  Number of tokens to update in a single batch. Defaults to environment configuration
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Returns `"ok"` on success
+</ResponseField>
+
+<ResponseField name="updated" type="number">
+  Number of price snapshots created or updated
+</ResponseField>
+
+<ResponseField name="failed" type="number">
+  Number of tokens that failed to update
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp of when the job completed
+</ResponseField>
+
+### Examples
+
+#### Update all tokens
+
+```bash
+curl -X POST https://your-domain.com/api/prices \
+  -H "Authorization: Bearer ${INGESTION_SECRET}" \
+  -H "Content-Type: application/json"
+```
+
+#### Update specific tokens
+
+```bash
+curl -X POST https://your-domain.com/api/prices \
+  -H "Authorization: Bearer ${INGESTION_SECRET}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chain": "eth",
+    "tokens": [
+      "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "0xdac17f958d2ee523a2206206994597c13d831ec7"
+    ],
+    "batchSize": 50
+  }'
+```
+
+#### Success Response
+
+Status code: `200`
+
+```json
+{
+  "status": "ok",
+  "updated": 47,
+  "failed": 3,
+  "timestamp": "2024-01-15T12:00:00.000Z"
+}
+```
+
+### Error Responses
+
+#### Unauthorized
+
+Status code: `401`
+
+```json
+{
+  "status": "error",
+  "message": "unauthorized"
+}
+```
+
+#### Invalid Tokens
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "invalid_tokens"
+}
+```
+
+#### Server Not Configured
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "server_not_configured"
+}
+```
+
+#### Job Failed
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "Error description here"
+}
+```
+
+### Configuration
+
+Set the following environment variables:
+
+```bash
+# Required
+INGESTION_SECRET=your-secret-token
+
+# Optional - price service configuration
+PRICE_API_KEY=your-price-api-key
+PRICE_BATCH_SIZE=50
+```
+
+### How It Works
+
+1. **Token discovery**: If no tokens specified, finds all tokens from recent transfers
+2. **Price fetching**: Queries external price API for current USD prices
+3. **Batch processing**: Processes tokens in configurable batch sizes
+4. **Storage**: Upserts price snapshots into the `prices` table
+5. **Error handling**: Continues processing even if some tokens fail
+
+### Scheduling
+
+Recommended cron job setup:
+
+```bash
+# Every 15 minutes
+*/15 * * * * curl -X POST https://your-domain.com/api/prices \
+  -H "Authorization: Bearer ${INGESTION_SECRET}"
+```
+
+### Use Cases
+
+- **Scheduled updates**: Keep token prices current via cron
+- **On-demand refresh**: Update prices after ingesting new transfers
+- **Specific tokens**: Update prices for high-priority tokens
+- **Backfill**: Fill historical price data gaps
+
+### Performance Notes
+
+- Price updates are batched to avoid rate limits
+- Failed tokens don't stop the entire job
+- Duplicate price snapshots are handled via upsert
+- External API rate limits may affect `batchSize`
+
+### Best Practices
+
+1. **Schedule regularly**: Run every 15-30 minutes for current prices
+2. **Monitor failures**: Check `failed` count in responses
+3. **Batch size**: Adjust based on your price API rate limits
+4. **Specific tokens**: Update high-volume tokens more frequently
+5. **Error handling**: Implement retry logic for failed requests

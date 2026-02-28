@@ -1,0 +1,441 @@
+---
+title: Dashboard
+description: Portfolio view, transfer history, analytics cards, and token holdings for your tracked wallets
+---
+
+## Overview
+
+The Cogniflow dashboard provides a comprehensive view of your Ethereum wallet activity. After adding a wallet address, you'll see real-time portfolio metrics, token holdings, transfer history, and sync status—all updated as soon as ingestion completes.
+
+<Info>
+  The dashboard is **read-only** and displays indexed data from your Postgres database. It does not connect to MetaMask or require wallet signatures.
+</Info>
+
+## Dashboard Layout
+
+The dashboard is organized into four main sections:
+
+<CardGroup cols={2}>
+  <Card title="Header" icon="compass">
+    Wallet input, load button, user session info, and sync status badges
+  </Card>
+  
+  <Card title="Analytics Cards" icon="chart-simple">
+    Portfolio summary: total transfers, incoming/outgoing counts, unique counterparties, USD valuations
+  </Card>
+  
+  <Card title="Transfer History" icon="clock-rotate-left">
+    Chronological list of the most recent 10 transfers (up to 25 available)
+  </Card>
+  
+  <Card title="Top Holdings" icon="coins">
+    Token positions ranked by net value (priced in USD when available)
+  </Card>
+</CardGroup>
+
+## Header & Wallet Input
+
+### Adding a Wallet
+
+At the top of the dashboard, you'll find:
+
+<Steps>
+  <Step title="Address input field">
+    Paste or type an Ethereum address (e.g., `0xabc123...`)
+  </Step>
+  
+  <Step title="Load activity button">
+    Click to add the wallet and trigger an immediate sync
+  </Step>
+  
+  <Step title="User session display">
+    Shows your email (from Supabase Auth) and a **Sign out** button
+  </Step>
+</Steps>
+
+<Tip>
+  You can switch between wallets at any time by entering a new address and clicking **Load activity**. Your previously tracked wallets remain in the database.
+</Tip>
+
+### Sync Status Indicators
+
+Two badges display the current ingestion state:
+
+| Badge | Meaning |
+|-------|----------|
+| **Chain: eth** | The blockchain network (Ethereum mainnet or Sepolia) |
+| **Sync: #19,234,567** | The most recent block number indexed for this wallet |
+| **Updated 2/28/26, 3:45 PM** | Timestamp of the last successful sync |
+| **Waiting for first sync…** | The wallet was just added and ingestion is pending |
+
+<Warning>
+  If sync status shows "Waiting for first sync…" for more than a few minutes, check your RPC provider configuration and rate limits.
+</Warning>
+
+### Loading State
+
+When a sync is in progress, you'll see:
+- A **pulsing blue indicator** at the bottom of the screen
+- "Updating wallet analytics…" message
+- Global cursor changes to `cursor-progress`
+
+The UI remains interactive during ingestion—you can navigate away and return without interrupting the process.
+
+## Analytics Cards
+
+Once data is loaded, the dashboard displays up to 7 summary cards:
+
+### Core Metrics
+
+<Tabs>
+  <Tab title="Total Transfers">
+    **What it shows**: Count of all ERC-20 transfers (both incoming and outgoing) during the selected time window (default: last 7 days)
+    
+    **Use case**: Gauge wallet activity level at a glance
+    
+    **Example**: `1.2K` (1,234 transfers)
+  </Tab>
+  
+  <Tab title="Incoming Transfers">
+    **What it shows**: Count of transfers where your wallet was the recipient
+    
+    **Use case**: Track deposits, payments received, or airdrops
+    
+    **Example**: `456` (456 incoming transfers)
+  </Tab>
+  
+  <Tab title="Outgoing Transfers">
+    **What it shows**: Count of transfers where your wallet was the sender
+    
+    **Use case**: Monitor spending, withdrawals, or contract interactions
+    
+    **Example**: `778` (778 outgoing transfers)
+  </Tab>
+  
+  <Tab title="Unique Counterparties">
+    **What it shows**: Number of distinct addresses you've interacted with
+    
+    **Use case**: Measure wallet diversity (many counterparties = active trader; few = specialized use)
+    
+    **Example**: `89` (89 unique addresses)
+  </Tab>
+</Tabs>
+
+### USD Valuations
+
+<Info>
+  USD metrics are only displayed if the `/api/prices` job has run to fetch spot prices from CoinGecko. Without price data, these cards are hidden.
+</Info>
+
+<Tabs>
+  <Tab title="Net USD">
+    **Formula**: `Incoming USD - Outgoing USD`
+    
+    **Interpretation**:
+    - Positive = Net accumulation (received more than sent)
+    - Negative = Net distribution (sent more than received)
+    
+    **Example**: `$12.3K` (net gain of $12,345)
+  </Tab>
+  
+  <Tab title="Incoming USD">
+    **Formula**: Sum of `amount * spot_price` for all incoming transfers
+    
+    **Use case**: Total value of deposits/credits received
+    
+    **Example**: `$45.6K`
+  </Tab>
+  
+  <Tab title="Outgoing USD">
+    **Formula**: Sum of `amount * spot_price` for all outgoing transfers
+    
+    **Use case**: Total value of withdrawals/debits sent
+    
+    **Example**: `$33.3K`
+  </Tab>
+</Tabs>
+
+### Card Formatting
+
+- **Compact notation**: Large numbers use "K" (thousands) or "M" (millions) suffixes (e.g., `1.2K`, `3.4M`)
+- **Precision**: Values under 1,000 show up to 2 decimal places; larger values show 1 decimal place
+- **Color coding**: Cards use neutral colors by default (no red/green for profit/loss—design is intentionally minimal)
+
+## Transfer History
+
+### List View
+
+The **Latest transfers** section displays the 10 most recent transfers in a card-based layout:
+
+<CardGroup cols={1}>
+  <Card title="Transfer Card Anatomy">
+    **Header**
+    - Token symbol (e.g., USDT, DAI)
+    - Timestamp (localized to your timezone)
+    - Direction badge: **Incoming** (green) or **Outgoing** (yellow/orange)
+    
+    **Addresses**
+    - From: Sender address (shortened to 12 chars, e.g., `0xabc123abc123…`)
+    - Arrow (`→`) separator
+    - To: Recipient address (right-aligned, shortened)
+    
+    **Amount & Transaction**
+    - Token amount (e.g., `1234.56 USDT`)
+    - Transaction hash (clickable link to Etherscan)
+    - USD valuation (if price data available): `$1,234.56` and `$1.00 spot`
+  </Card>
+</CardGroup>
+
+<Tip>
+  Click on a transaction hash to open the full transaction details on Etherscan (or Sepolia Etherscan if using testnet).
+</Tip>
+
+### Direction Badges
+
+- **Incoming** (green): Transfer where `to_addr` matches your wallet address
+- **Outgoing** (yellow): Transfer where `from_addr` matches your wallet address
+
+### Pagination
+
+The dashboard shows only the first 10 transfers. If more are available, you'll see:
+
+```
+More transfers available via the API.
+```
+
+<Note>
+  To view the full history, use the `/api/transfers` endpoint with pagination:
+  ```bash
+  GET /api/transfers?address=0x...&chain=eth&limit=50&cursor=<nextCursor>
+  ```
+  
+  Or export to CSV by querying the `transfers` table directly.
+</Note>
+
+## Top Holdings
+
+### Holdings Card
+
+The **Top holdings** section ranks your token positions by **net value** (incoming - outgoing) and displays the top 5:
+
+<Tabs>
+  <Tab title="Card Layout">
+    **Header**
+    - Token symbol (e.g., WETH, USDC)
+    - Token contract address (shortened)
+    - Badge: **Net long** (green) if net > 0, **Net out** (amber) if net < 0
+    
+    **Metrics**
+    - **Net position**: `+1,234.56 WETH` or `-567.89 DAI`
+    - **In/Out breakdown**: `1,500 in · 265.44 out`
+    - **Spot price**: `Spot $3,456.78 · 2/28/26, 3:45 PM` (if available)
+    - **USD valuation**: `Priced net $4.2M` (if price available)
+  </Tab>
+  
+  <Tab title="Ranking Logic">
+    Holdings are sorted by:
+    1. **USD net value** (if prices exist) — highest absolute value first
+    2. **Token net amount** (if no price) — highest amount first
+    
+    This means:
+    - A token with `$10K net` ranks above one with `$5K net`
+    - A token with `-$8K net` (net outgoing) may rank higher than one with `+$3K net` due to absolute value
+  </Tab>
+</Tabs>
+
+<Warning>
+  **Negative positions** (net outgoing) appear in the top holdings if the absolute value is large. This is by design—it highlights significant outflows (e.g., loan repayments, large transfers).
+</Warning>
+
+### When No Holdings Are Available
+
+If the wallet has no transfers during the selected window, you'll see:
+
+```
+No holdings found in the selected window.
+```
+
+**Possible causes**:
+- The wallet was inactive during the last 7 days (default window)
+- Only native ETH transfers occurred (not yet supported)
+- Ingestion hasn't completed yet
+
+## Time Window Selection
+
+<Info>
+  **Current limitation**: The dashboard hardcodes a 7-day window for analytics cards and holdings. API queries support custom windows via the `days` parameter.
+</Info>
+
+To view a different range:
+- **Via API**: `GET /api/portfolio?address=0x...&chain=eth&days=30`
+- **Future UI**: A date picker will be added to the dashboard header in a future release
+
+## Real-Time Updates
+
+The dashboard automatically refreshes when:
+1. You enter a new wallet address and click **Load activity**
+2. The wallet sync completes (triggered by the `POST /api/wallets` call)
+
+**No polling**: The UI does not auto-refresh in the background. To see updated data after a scheduled ingestion job, reload the page or re-enter the address.
+
+<Tip>
+  For production use, consider adding a WebSocket connection or polling mechanism to refresh the dashboard every 5-10 minutes.
+</Tip>
+
+## Empty States
+
+### No Address Entered
+
+If you visit the dashboard without loading a wallet:
+
+```
+Enter an address to see portfolio insights.
+```
+
+### No Transfers in Time Window
+
+If a wallet exists but has zero activity in the last 7 days:
+
+<Info>
+  "No transfers in the last 7 days. We didn't detect movements during this window. Historical transfers are still listed below so you can preview older activity while the backfill completes."
+</Info>
+
+This message appears when:
+- The wallet was just created and has no recent activity
+- The wallet is dormant (no transfers since the sync began)
+- The ingestion job hasn't backfilled older data yet
+
+## Export & External Tools
+
+While the dashboard provides a user-friendly UI, you can export data for deeper analysis:
+
+### API Export
+
+<CodeGroup>
+```bash Portfolio Summary
+curl "https://your-app.vercel.app/api/portfolio?address=0x...&chain=eth&days=30"
+```
+
+```bash Transfer History
+curl "https://your-app.vercel.app/api/transfers?address=0x...&chain=eth&limit=100"
+```
+
+```bash Semantic Search
+curl "https://your-app.vercel.app/api/search?q=large+USDT+transfers&address=0x...&chain=eth&limit=25"
+```
+</CodeGroup>
+
+### SQL Export
+
+Connect directly to your Supabase Postgres database:
+
+```sql
+-- All transfers for a wallet
+SELECT * FROM transfers 
+WHERE (from_addr = '0x...' OR to_addr = '0x...')
+  AND chain = 'eth'
+ORDER BY timestamp DESC;
+
+-- Token holdings (net positions)
+SELECT 
+  token,
+  symbol,
+  SUM(CASE WHEN to_addr = '0x...' THEN amount_dec ELSE -amount_dec END) AS net
+FROM transfers
+WHERE (from_addr = '0x...' OR to_addr = '0x...')
+  AND chain = 'eth'
+GROUP BY token, symbol
+ORDER BY ABS(net) DESC;
+```
+
+## Customization
+
+The dashboard component (`/web/components/dashboard.tsx`) is highly customizable:
+
+<CardGroup cols={2}>
+  <Card title="Change time window" icon="calendar">
+    Modify `DEFAULT_WINDOW_DAYS` (line 126) to adjust the analytics window
+  </Card>
+  
+  <Card title="Show more transfers" icon="list">
+    Increase the slice limit on line 666: `transfers.slice(0, 25)`
+  </Card>
+  
+  <Card title="Add more holdings" icon="coins">
+    Change the slice limit on line 751: `topHoldings.slice(0, 10)`
+  </Card>
+  
+  <Card title="Customize formatting" icon="paintbrush">
+    Edit `formatCompact`, `formatUsd`, `shortenAddress` helpers
+  </Card>
+</CardGroup>
+
+<Tip>
+  To add a chart library (Recharts, Chart.js), import the library in `dashboard.tsx` and replace the chart placeholder section starting at line 922.
+</Tip>
+
+## Responsive Design
+
+The dashboard adapts to all screen sizes:
+
+| Breakpoint | Layout |
+|------------|--------|
+| **Mobile** (&lt;640px) | Single column; cards stack vertically |
+| **Tablet** (640-1024px) | 2-column grid for analytics cards; transfers and holdings stack |
+| **Desktop** (&gt;1024px) | 3-column analytics grid; transfers (2 cols) + holdings (1 col) side-by-side |
+
+<Note>
+  All text is rendered in a monospace-friendly font to match the CLI-first design philosophy of Cogniflow.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Dashboard shows outdated data">
+    The dashboard does not auto-refresh. To see fresh data:
+    - Reload the page (browser refresh)
+    - Re-enter the wallet address and click **Load activity**
+    - Or wait for the next scheduled ingestion job to run
+  </Accordion>
+  
+  <Accordion title="USD values are missing">
+    Price data requires the `/api/prices` job to have run. To fix:
+    ```bash
+    curl -X POST https://your-app.vercel.app/api/prices \
+      -H "Authorization: Bearer <INGESTION_SECRET>" \
+      -H "Content-Type: application/json" \
+      -d '{"chain":"eth"}'
+    ```
+    Schedule this job to run hourly for continuous price updates.
+  </Accordion>
+  
+  <Accordion title="Transfers show incorrect amounts">
+    Possible causes:
+    - **Non-standard decimals**: Some tokens use unusual decimal values (check the `decimals` field)
+    - **Stale data**: Re-sync the wallet to refresh transfer records
+    - **Alchemy API issue**: Verify your RPC endpoint is returning correct `rawContract.value` fields
+  </Accordion>
+  
+  <Accordion title="Holdings show negative net positions">
+    This is **expected behavior** if you sent more tokens than you received. For example:
+    - You deposited 1,000 USDT and withdrew 1,200 USDT → net position is `-200 USDT`
+    - This is useful for tracking loan repayments, contract interactions, or wallet migrations
+    
+    To hide negative positions, filter the `topHoldings` array in `dashboard.tsx`:
+    ```typescript
+    const positiveHoldings = topHoldings.filter(h => Number(h.netUsd ?? h.net) >= 0);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Chat Interface" href="/features/chat-interface" icon="messages">
+    Ask natural language questions about your portfolio
+  </Card>
+  
+  <Card title="Semantic Search" href="/features/semantic-search" icon="magnifying-glass">
+    Discover transfers using AI-powered vector search
+  </Card>
+</CardGroup>

@@ -1,0 +1,254 @@
+---
+title: Get Portfolio
+description: Get aggregated portfolio data for a wallet
+---
+
+## GET /api/portfolio
+
+Retrieve aggregated portfolio statistics including holdings, valuations, and transfer counts for a wallet address within a time window.
+
+<Info>
+  This endpoint does not require authentication for read access.
+</Info>
+
+### Query Parameters
+
+<ParamField query="address" type="string" required>
+  Wallet address to query (case-insensitive)
+</ParamField>
+
+<ParamField query="chain" type="string" default="eth">
+  Blockchain network to query
+</ParamField>
+
+<ParamField query="days" type="number" default="7">
+  Time window in days (min: 1, max: 90)
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Returns `"ok"` on success
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Portfolio data object
+  
+  <Expandable title="properties">
+    <ResponseField name="address" type="string">
+      Normalized wallet address
+    </ResponseField>
+    
+    <ResponseField name="chain" type="string">
+      Blockchain network
+    </ResponseField>
+    
+    <ResponseField name="windowDays" type="number">
+      Time window used for calculations
+    </ResponseField>
+    
+    <ResponseField name="totals" type="object">
+      Aggregate counts
+      
+      <Expandable title="properties">
+        <ResponseField name="transfers" type="number">
+          Total number of transfers (incoming + outgoing)
+        </ResponseField>
+        
+        <ResponseField name="incomingTransfers" type="number">
+          Number of incoming transfers
+        </ResponseField>
+        
+        <ResponseField name="outgoingTransfers" type="number">
+          Number of outgoing transfers
+        </ResponseField>
+        
+        <ResponseField name="counterparties" type="number">
+          Unique addresses interacted with
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="holdings" type="array">
+      Array of token holdings
+      
+      <Expandable title="Holding object properties">
+        <ResponseField name="token" type="string">
+          Token contract address
+        </ResponseField>
+        
+        <ResponseField name="symbol" type="string | null">
+          Token symbol
+        </ResponseField>
+        
+        <ResponseField name="decimals" type="number | null">
+          Token decimals
+        </ResponseField>
+        
+        <ResponseField name="incoming" type="string">
+          Total incoming amount
+        </ResponseField>
+        
+        <ResponseField name="outgoing" type="string">
+          Total outgoing amount
+        </ResponseField>
+        
+        <ResponseField name="net" type="string">
+          Net position (incoming - outgoing)
+        </ResponseField>
+        
+        <ResponseField name="priceUsd" type="string | null">
+          Current USD price per token
+        </ResponseField>
+        
+        <ResponseField name="priceTimestamp" type="string | null">
+          ISO 8601 timestamp of price data
+        </ResponseField>
+        
+        <ResponseField name="incomingUsd" type="string | null">
+          Total incoming value in USD
+        </ResponseField>
+        
+        <ResponseField name="outgoingUsd" type="string | null">
+          Total outgoing value in USD
+        </ResponseField>
+        
+        <ResponseField name="netUsd" type="string | null">
+          Net position value in USD
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="valuations" type="object">
+      Aggregate USD valuations
+      
+      <Expandable title="properties">
+        <ResponseField name="incomingUsd" type="string">
+          Total incoming value in USD
+        </ResponseField>
+        
+        <ResponseField name="outgoingUsd" type="string">
+          Total outgoing value in USD
+        </ResponseField>
+        
+        <ResponseField name="netUsd" type="string">
+          Net position value in USD
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="sync" type="object | null">
+      Wallet sync status
+      
+      <Expandable title="properties">
+        <ResponseField name="lastSyncedBlock" type="number | null">
+          Last block number synced
+        </ResponseField>
+        
+        <ResponseField name="lastSyncedAt" type="string | null">
+          ISO 8601 timestamp of last sync
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Examples
+
+#### Get 7-day portfolio
+
+```bash
+curl "https://your-domain.com/api/portfolio?address=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb&chain=eth"
+```
+
+#### Get 30-day portfolio
+
+```bash
+curl "https://your-domain.com/api/portfolio?address=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb&days=30"
+```
+
+#### Response Example
+
+```json
+{
+  "status": "ok",
+  "data": {
+    "address": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+    "chain": "eth",
+    "windowDays": 7,
+    "totals": {
+      "transfers": 142,
+      "incomingTransfers": 87,
+      "outgoingTransfers": 55,
+      "counterparties": 34
+    },
+    "holdings": [
+      {
+        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "symbol": "USDC",
+        "decimals": 6,
+        "incoming": "5000.000000",
+        "outgoing": "2000.000000",
+        "net": "3000.000000",
+        "priceUsd": "1.00",
+        "priceTimestamp": "2024-01-15T12:00:00.000Z",
+        "incomingUsd": "5000.00",
+        "outgoingUsd": "2000.00",
+        "netUsd": "3000.00"
+      }
+    ],
+    "valuations": {
+      "incomingUsd": "8500.00",
+      "outgoingUsd": "4200.00",
+      "netUsd": "4300.00"
+    },
+    "sync": {
+      "lastSyncedBlock": 18501500,
+      "lastSyncedAt": "2024-01-15T11:00:00.000Z"
+    }
+  }
+}
+```
+
+### Error Responses
+
+#### Invalid Query Parameters
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "invalid_query_params",
+  "issues": {
+    "fieldErrors": {
+      "address": ["address is required"]
+    }
+  }
+}
+```
+
+#### Internal Error
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "internal_error"
+}
+```
+
+### Use Cases
+
+- **Portfolio tracking**: Monitor wallet holdings over time
+- **Activity analysis**: Track transfer counts and counterparty interactions
+- **Valuation**: Calculate USD value of positions
+- **Reporting**: Generate portfolio summaries for different time periods
+
+### Notes
+
+- Holdings are sorted by net position (descending)
+- USD values are calculated using the most recent price snapshots
+- Prices may be `null` for tokens without price data
+- The `sync` object indicates when the wallet data was last updated

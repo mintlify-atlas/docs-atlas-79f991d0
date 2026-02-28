@@ -1,0 +1,359 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for Cogniflow development
+---
+
+This guide covers common issues you may encounter when developing or deploying Cogniflow.
+
+## Database issues
+
+<AccordionGroup>
+  <Accordion title="Error: P1001 - Can't reach database server">
+    **Cause:** Database connection failed
+    
+    **Solutions:**
+    1. Verify `DATABASE_URL` in `.env` is correct
+    2. Check that your database is running
+    3. For Supabase, ensure you're using the **connection pooling URL** (`DIRECT_URL` for migrations)
+    4. Test connectivity:
+       ```bash
+       psql "$DATABASE_URL" -c "SELECT 1"
+       ```
+  </Accordion>
+  
+  <Accordion title="Error: extension 'vector' does not exist">
+    **Cause:** pgvector extension not enabled
+    
+    **Solution:**
+    Enable the extension in your database:
+    ```sql
+    CREATE EXTENSION IF NOT EXISTS vector;
+    ```
+    
+    For Supabase, run this in the SQL Editor.
+  </Accordion>
+  
+  <Accordion title="Migration failed: table already exists">
+    **Cause:** Database out of sync with migrations
+    
+    **Solution:**
+    Reset migrations (⚠️ this will drop all data):
+    ```bash
+    npx prisma migrate reset
+    ```
+    
+    Or manually mark migrations as applied:
+    ```bash
+    npx prisma migrate resolve --applied <migration_name>
+    ```
+  </Accordion>
+  
+  <Accordion title="Slow queries on transfers table">
+    **Cause:** Missing indexes or large table scans
+    
+    **Solution:**
+    1. Ensure indexes exist (run `npx prisma migrate dev`)
+    2. Use `EXPLAIN ANALYZE` to identify bottlenecks:
+       ```sql
+       EXPLAIN ANALYZE
+       SELECT * FROM transfers WHERE to_addr = '0x123...';
+       ```
+    3. Add `LIMIT` to paginated queries
+    4. Filter by `blockNumber` to reduce scanned rows
+  </Accordion>
+</AccordionGroup>
+
+## RPC and indexing issues
+
+<AccordionGroup>
+  <Accordion title="Indexer returns no transfers">
+    **Cause:** RPC errors, wrong block range, or no transfers in range
+    
+    **Troubleshooting:**
+    1. Check RPC connectivity:
+       ```bash
+       curl $ETH_RPC_URL \
+         -X POST \
+         -H "Content-Type: application/json" \
+         -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+       ```
+    2. Verify the wallet has transfers in the block range
+    3. Check worker logs for errors:
+       ```bash
+       LOG_LEVEL=debug npm run start -w worker
+       ```
+    4. Ensure `ETH_LOOKBACK_BLOCKS` is reasonable (5000-10000)
+  </Accordion>
+  
+  <Accordion title="RPC rate limit errors (429)">
+    **Cause:** Too many requests to RPC provider
+    
+    **Solutions:**
+    1. Reduce `INGESTION_MAX_PAGES` to fetch fewer blocks per run
+    2. Increase `RPC_RETRY_BASE_MS` for longer backoff
+    3. Upgrade your RPC provider plan (Alchemy, Infura)
+    4. Use a different RPC endpoint as fallback
+  </Accordion>
+  
+  <Accordion title="Transfers missing token symbol or decimals">
+    **Cause:** Token contract doesn't implement ERC-20 metadata
+    
+    **Solution:**
+    This is expected for some tokens. The indexer will store `null` for missing fields. You can:
+    1. Manually populate metadata from a registry (e.g., CoinGecko)
+    2. Use token address as fallback identifier
+  </Accordion>
+  
+  <Accordion title="Ingestion job times out">
+    **Cause:** Too many blocks to process in one run
+    
+    **Solutions:**
+    1. Reduce `INGESTION_MAX_BLOCK_SPAN` (default: 50000)
+    2. Limit `INGESTION_MAX_PAGES` to process fewer wallets per run
+    3. Increase serverless function timeout in Vercel (max 60s on Hobby, 300s on Pro)
+  </Accordion>
+</AccordionGroup>
+
+## Authentication issues
+
+<AccordionGroup>
+  <Accordion title="Error: Invalid login credentials">
+    **Cause:** Incorrect email/password or user doesn't exist
+    
+    **Solution:**
+    1. Verify email is correct and confirmed (check Supabase dashboard)
+    2. Reset password via Supabase Auth UI
+    3. Check that email confirmations are enabled/disabled correctly
+  </Accordion>
+  
+  <Accordion title="OAuth redirect fails (Google/GitHub)">
+    **Cause:** Redirect URL not configured in Supabase
+    
+    **Solution:**
+    1. Go to Supabase dashboard → Authentication → URL Configuration
+    2. Add your app URL to **Redirect URLs**:
+       - Local: `http://localhost:3000`
+       - Production: `https://your-app.vercel.app`
+    3. Ensure OAuth provider callback URL matches your app domain
+  </Accordion>
+  
+  <Accordion title="Session expired immediately after login">
+    **Cause:** Cookie misconfiguration or domain mismatch
+    
+    **Solution:**
+    1. Check that `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are correct
+    2. Ensure cookies are enabled in browser
+    3. For production, verify domain matches Supabase allowed URLs
+  </Accordion>
+  
+  <Accordion title="Background jobs return 401 Unauthorized">
+    **Cause:** Missing or incorrect `INGESTION_SECRET`
+    
+    **Solution:**
+    1. Set `INGESTION_SECRET` in environment variables
+    2. Use the same secret in cron job `Authorization` header:
+       ```bash
+       Authorization: Bearer YOUR_INGESTION_SECRET
+       ```
+    3. Verify the secret matches in both Vercel env vars and cron config
+  </Accordion>
+</AccordionGroup>
+
+## API and data issues
+
+<AccordionGroup>
+  <Accordion title="/api/portfolio returns empty data">
+    **Cause:** No transfers indexed for the wallet
+    
+    **Solution:**
+    1. Check that the wallet address is correct (0x-prefixed, lowercase)
+    2. Ensure ingestion has run for this wallet:
+       ```bash
+       curl -X POST http://localhost:3000/api/wallets \
+         -H "Content-Type: application/json" \
+         -d '{"address":"0x123...","chain":"eth"}'
+       ```
+    3. Verify transfers exist in database:
+       ```sql
+       SELECT COUNT(*) FROM transfers WHERE to_addr = '0x123...' OR from_addr = '0x123...';
+       ```
+  </Accordion>
+  
+  <Accordion title="/api/search returns no results">
+    **Cause:** No embeddings generated for transfers
+    
+    **Solution:**
+    1. Run the embeddings job:
+       ```bash
+       npm run start:embeddings -w worker
+       ```
+    2. Verify embeddings exist:
+       ```sql
+       SELECT COUNT(*) FROM tx_embeddings;
+       ```
+    3. Check `OPENAI_API_KEY` is set and valid
+  </Accordion>
+  
+  <Accordion title="/api/chat doesn't call SQL tools">
+    **Cause:** LLM not selecting tools or tool definitions unclear
+    
+    **Solution:**
+    1. Improve tool descriptions in `/api/chat` to be more specific
+    2. Check that the user query actually requires a tool (try "Who did I trade with most?")
+    3. Verify LLM API key is valid and model supports function calling
+  </Accordion>
+  
+  <Accordion title="Price data missing for tokens">
+    **Cause:** Price job not run or CoinGecko API error
+    
+    **Solution:**
+    1. Run the price job:
+       ```bash
+       npm run start:prices -w worker
+       ```
+    2. Check worker logs for CoinGecko API errors
+    3. Verify `COINGECKO_API_KEY` if using Pro tier
+    4. Some tokens may not be listed on CoinGecko (expected)
+  </Accordion>
+</AccordionGroup>
+
+## Deployment issues
+
+<AccordionGroup>
+  <Accordion title="Vercel build fails: Prisma generate error">
+    **Cause:** Prisma client not generated during build
+    
+    **Solution:**
+    Ensure `npm run build -w web` includes:
+    ```json
+    {
+      "scripts": {
+        "build": "npm run generate && next build",
+        "generate": "prisma generate --schema ../prisma/schema.prisma"
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Environment variables not working in production">
+    **Cause:** Variables not set in Vercel project settings
+    
+    **Solution:**
+    1. Go to Vercel dashboard → Project → Settings → Environment Variables
+    2. Add all required variables from `.env.example`
+    3. Redeploy the app to apply changes
+  </Accordion>
+  
+  <Accordion title="Cron jobs not triggering">
+    **Cause:** Vercel Cron not configured or wrong schedule
+    
+    **Solution:**
+    1. Verify `vercel.json` exists with correct cron config:
+       ```json
+       {
+         "crons": [
+           { "path": "/api/ingest", "schedule": "*/15 * * * *" }
+         ]
+       }
+       ```
+    2. Check cron logs in Vercel dashboard → Deployments → Functions
+    3. Ensure cron endpoint has `INGESTION_SECRET` configured
+  </Accordion>
+  
+  <Accordion title="Database migrations fail in production">
+    **Cause:** Migration not run during deployment
+    
+    **Solution:**
+    Run migrations manually:
+    ```bash
+    DATABASE_URL="postgresql://..." npx prisma migrate deploy
+    ```
+    
+    Or add to Vercel build command:
+    ```json
+    {
+      "scripts": {
+        "vercel-build": "prisma migrate deploy && npm run build -w web"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Development issues
+
+<AccordionGroup>
+  <Accordion title="npm install fails with dependency conflicts">
+    **Cause:** Conflicting package versions
+    
+    **Solution:**
+    1. Delete `node_modules` and `package-lock.json`:
+       ```bash
+       rm -rf node_modules package-lock.json
+       rm -rf web/node_modules worker/node_modules
+       ```
+    2. Reinstall:
+       ```bash
+       npm install
+       ```
+    3. If still failing, check Node.js version (requires 18+)
+  </Accordion>
+  
+  <Accordion title="TypeScript errors after schema change">
+    **Cause:** Prisma client not regenerated
+    
+    **Solution:**
+    ```bash
+    npx prisma generate
+    ```
+    
+    Restart your editor/IDE to pick up new types.
+  </Accordion>
+  
+  <Accordion title="Hot reload not working in Next.js dev server">
+    **Cause:** File watcher limit or cache issue
+    
+    **Solution:**
+    1. Increase file watcher limit (Linux/macOS):
+       ```bash
+       echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
+       ```
+    2. Clear Next.js cache:
+       ```bash
+       rm -rf web/.next
+       npm run dev -w web
+       ```
+  </Accordion>
+</AccordionGroup>
+
+## Getting help
+
+If you're still stuck after trying these solutions:
+
+1. **Check logs:** Look for error messages in:
+   - Terminal output
+   - Browser console (F12)
+   - Vercel function logs
+   - Database logs (Supabase dashboard)
+
+2. **Enable debug logging:**
+   ```bash
+   LOG_LEVEL=debug npm run start -w worker
+   ```
+
+3. **Search existing issues:** https://github.com/devaanshsinha/cogniflow/issues
+
+4. **Open a new issue:** Include:
+   - Error message (full stack trace)
+   - Steps to reproduce
+   - Environment (Node version, OS, etc.)
+   - Relevant logs
+
+<CardGroup cols={2}>
+  <Card title="GitHub Issues" icon="github" href="https://github.com/devaanshsinha/cogniflow/issues">
+    Report bugs or ask questions
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/dev/contributing">
+    Learn how to contribute fixes
+  </Card>
+</CardGroup>

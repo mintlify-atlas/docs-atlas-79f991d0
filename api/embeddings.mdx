@@ -1,0 +1,225 @@
+---
+title: Update Embeddings
+description: Background job to generate transfer embeddings
+---
+
+## POST /api/embeddings
+
+Background job endpoint to generate vector embeddings for transfers. These embeddings power semantic search functionality.
+
+<Warning>
+  Requires bearer token authentication with `INGESTION_SECRET`. See [Authentication](/api/authentication) for details.
+</Warning>
+
+### Authentication
+
+```bash
+Authorization: Bearer YOUR_INGESTION_SECRET
+```
+
+### Request Body
+
+All fields are optional. Empty body uses default behavior.
+
+<ParamField body="chain" type="string">
+  Blockchain network to generate embeddings for. Defaults to environment configuration
+</ParamField>
+
+<ParamField body="batchSize" type="number">
+  Number of transfers to process in a single batch. Defaults to environment configuration
+</ParamField>
+
+<ParamField body="maxRecords" type="number">
+  Maximum number of transfers to process in this run. Useful for incremental processing
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Returns `"ok"` on success
+</ResponseField>
+
+<ResponseField name="processed" type="number">
+  Number of embeddings generated
+</ResponseField>
+
+<ResponseField name="failed" type="number">
+  Number of transfers that failed to process
+</ResponseField>
+
+<ResponseField name="skipped" type="number">
+  Number of transfers skipped (already have embeddings)
+</ResponseField>
+
+### Examples
+
+#### Generate embeddings for all transfers
+
+```bash
+curl -X POST https://your-domain.com/api/embeddings \
+  -H "Authorization: Bearer ${INGESTION_SECRET}" \
+  -H "Content-Type: application/json"
+```
+
+#### Generate embeddings with limits
+
+```bash
+curl -X POST https://your-domain.com/api/embeddings \
+  -H "Authorization: Bearer ${INGESTION_SECRET}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chain": "eth",
+    "batchSize": 20,
+    "maxRecords": 100
+  }'
+```
+
+#### Success Response
+
+Status code: `200`
+
+```json
+{
+  "status": "ok",
+  "processed": 87,
+  "failed": 2,
+  "skipped": 11
+}
+```
+
+### Error Responses
+
+#### Unauthorized
+
+Status code: `401`
+
+```json
+{
+  "status": "error",
+  "message": "unauthorized"
+}
+```
+
+#### Server Not Configured
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "server_not_configured"
+}
+```
+
+#### Job Failed
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "Error description here"
+}
+```
+
+### Configuration
+
+Set the following environment variables:
+
+```bash
+# Required
+INGESTION_SECRET=your-secret-token
+OPENAI_API_KEY=sk-...
+
+# Optional - embedding configuration
+EMBEDDING_BATCH_SIZE=20
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+### How It Works
+
+1. **Transfer selection**: Finds transfers without embeddings
+2. **Text generation**: Creates descriptive text for each transfer
+3. **Embedding generation**: Calls OpenAI API to generate vector embeddings
+4. **Batch processing**: Processes transfers in configurable batches
+5. **Storage**: Stores embeddings in `tx_embeddings` table with pgvector
+6. **Error handling**: Continues processing even if some transfers fail
+
+### Embedding Content
+
+Each transfer is converted to a text description including:
+
+- Token symbol and amount
+- Sender and recipient addresses
+- Transaction timestamp
+- Transfer direction
+- USD value (if available)
+
+**Example text:**
+```
+Transfer of 1000.00 USDC from 0x1234...5678 to 0xabcd...ef01 on 2024-01-15 at 10:30:00 UTC. Value: $1000.00
+```
+
+### Scheduling
+
+Recommended cron job setup:
+
+```bash
+# Every 30 minutes
+*/30 * * * * curl -X POST https://your-domain.com/api/embeddings \
+  -H "Authorization: Bearer ${INGESTION_SECRET}"
+```
+
+### Use Cases
+
+- **Initial setup**: Generate embeddings for existing transfers
+- **Incremental updates**: Process new transfers after ingestion
+- **Backfill**: Fill missing embeddings in batches
+- **Scheduled maintenance**: Keep embeddings up-to-date
+
+### Performance Notes
+
+- OpenAI API calls are batched to reduce latency
+- Rate limits apply based on your OpenAI tier
+- Processing is incremental - only new transfers are embedded
+- Batch size affects throughput vs. memory usage
+- Failed embeddings don't block successful ones
+
+### Cost Considerations
+
+- Each transfer generates one embedding API call
+- `text-embedding-3-small` model is cost-effective
+- Use `maxRecords` to control API costs
+- Embeddings are stored permanently (no re-generation needed)
+
+### Best Practices
+
+1. **Run after ingestion**: Generate embeddings after syncing new transfers
+2. **Batch processing**: Use `maxRecords` for large backlogs
+3. **Monitor failures**: Check `failed` count and investigate errors
+4. **Cost management**: Set `maxRecords` based on API budget
+5. **Schedule regularly**: Run every 30-60 minutes for current data
+6. **Initial backfill**: Process in smaller batches for large datasets
+
+### Database Requirements
+
+- PostgreSQL with pgvector extension
+- `tx_embeddings` table with vector column
+- Sufficient storage for embedding vectors
+
+### Troubleshooting
+
+**High failure rate:**
+- Check OpenAI API key validity
+- Verify rate limits aren't exceeded
+- Check for malformed transfer data
+
+**Slow processing:**
+- Reduce `batchSize` to avoid timeouts
+- Check OpenAI API response times
+- Monitor database performance
+
+**Missing embeddings:**
+- Ensure job runs regularly
+- Check for errors in logs
+- Verify transfers exist in database

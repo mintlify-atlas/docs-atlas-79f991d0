@@ -1,0 +1,351 @@
+---
+title: Background Jobs
+description: Set up scheduled jobs for wallet ingestion, price updates, and embeddings using Vercel Cron or external schedulers
+---
+
+Cogniflow requires three background jobs to keep wallet data, token prices, and semantic search embeddings up to date. These jobs are exposed as authenticated API routes that can be triggered by Vercel Cron, GitHub Actions, or any HTTP scheduler.
+
+## Job Endpoints
+
+All job endpoints require bearer token authentication with your `INGESTION_SECRET`:
+
+```bash
+Authorization: Bearer YOUR_INGESTION_SECRET
+```
+
+<Warning>
+  Never commit `INGESTION_SECRET` to version control. Generate a strong random secret and store it securely in Vercel environment variables.
+</Warning>
+
+### POST /api/ingest
+
+Ingests ERC-20 transfers and balances for tracked wallets.
+
+**Request body** (optional):
+```json
+{
+  "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+  "chain": "eth"
+}
+```
+
+- `address` (optional): Sync a specific wallet address. If omitted, processes all wallets in the database.
+- `chain` (optional): Filter by chain (default: `eth`)
+
+**Environment variables**:
+- `INGESTION_BATCH_SIZE` - Number of wallets to process per run (default: `1`)
+- `INGESTION_MAX_PAGES` - Maximum pages of transfers to fetch per wallet (default: `8`)
+- `INGESTION_MAX_BLOCK_SPAN` - Maximum block range for RPC queries (default: `50000`)
+- `INGESTION_SKIP_RECENT_MS` - Skip wallets synced within this time (default: `600000` = 10 minutes)
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "processed": 1,
+  "remaining": 5,
+  "done": false,
+  "results": {
+    "successes": [
+      {
+        "walletId": "...",
+        "address": "0x...",
+        "newTransfers": 42,
+        "hasMore": false,
+        "durationMs": 1250
+      }
+    ],
+    "failures": []
+  }
+}
+```
+
+### POST /api/prices
+
+Fetches USD prices from CoinGecko for tokens seen in transfers.
+
+**Request body** (optional):
+```json
+{
+  "chain": "eth",
+  "tokens": ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"],
+  "batchSize": 1
+}
+```
+
+- `chain` (optional): Filter tokens by chain (default: `eth`)
+- `tokens` (optional): Array of token addresses to update. If omitted, updates all tokens.
+- `batchSize` (optional): Tokens per API call (default: `1` for free tier)
+
+**Environment variables**:
+- `COINGECKO_API_KEY` - CoinGecko API key (optional for free tier)
+- `PRICE_CHAIN` - Default chain for price lookups (default: `eth`)
+- `PRICE_BATCH_SIZE` - Tokens per request (default: `1`; Pro plans can increase)
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "chain": "eth",
+  "tokensUpdated": 12,
+  "timestamp": "2026-02-28T10:30:00.000Z"
+}
+```
+
+### POST /api/embeddings
+
+Generates OpenAI embeddings for transfers to enable semantic search.
+
+**Request body** (optional):
+```json
+{
+  "chain": "eth",
+  "batchSize": 32,
+  "maxRecords": 200
+}
+```
+
+- `chain` (optional): Filter transfers by chain (default: `eth`)
+- `batchSize` (optional): Transfers per OpenAI API call (default: `32`)
+- `maxRecords` (optional): Maximum transfers to embed per run (default: `200`)
+
+**Environment variables**:
+- `OPENAI_API_KEY` - OpenAI API key (required)
+- `OPENAI_BASE_URL` - API endpoint (default: `https://api.openai.com/v1`)
+- `EMBEDDING_MODEL` - Model name (default: `text-embedding-3-small`)
+- `EMBEDDING_CHAIN` - Default chain (default: `eth`)
+- `EMBEDDING_BATCH_SIZE` - Transfers per batch (default: `32`)
+- `EMBEDDING_DIM` - Vector dimension (default: `768`)
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "chain": "eth",
+  "processed": 150,
+  "hasMore": true
+}
+```
+
+## Option 1: Vercel Cron (Recommended)
+
+Vercel Cron is the simplest way to schedule jobs when your app is deployed on Vercel.
+
+<Steps>
+  <Step title="Create vercel.json in the web/ directory">
+    ```json
+    {
+      "crons": [
+        {
+          "path": "/api/ingest",
+          "schedule": "*/15 * * * *"
+        },
+        {
+          "path": "/api/prices",
+          "schedule": "0 * * * *"
+        },
+        {
+          "path": "/api/embeddings",
+          "schedule": "30 * * * *"
+        }
+      ]
+    }
+    ```
+
+    **Schedule explained**:
+    - `/api/ingest`: Every 15 minutes (keeps wallet data fresh)
+    - `/api/prices`: Every hour at :00 (CoinGecko free tier has rate limits)
+    - `/api/embeddings`: Every hour at :30 (runs after ingestion has populated new transfers)
+  </Step>
+
+  <Step title="Add CRON_SECRET to environment variables">
+    Vercel Cron automatically adds a `CRON_SECRET` environment variable to your project. Update your job authentication to accept both `INGESTION_SECRET` and `CRON_SECRET`.
+
+    Alternatively, configure Vercel Cron to send your `INGESTION_SECRET` by setting headers:
+
+    ```json
+    {
+      "crons": [
+        {
+          "path": "/api/ingest",
+          "schedule": "*/15 * * * *",
+          "headers": {
+            "Authorization": "Bearer YOUR_INGESTION_SECRET"
+          }
+        }
+      ]
+    }
+    ```
+
+    <Warning>
+      Do not commit secrets in `vercel.json`. Use Vercel's environment variable substitution or accept `CRON_SECRET` in your auth logic.
+    </Warning>
+  </Step>
+
+  <Step title="Deploy to Vercel">
+    Push your changes to trigger a deployment. Vercel will automatically register the cron jobs.
+
+    View scheduled runs in your Vercel dashboard:
+    - Go to **Project → Deployments → Cron**
+    - Monitor execution logs and success/failure rates
+  </Step>
+</Steps>
+
+### Vercel Cron Limitations
+
+- **Hobby plan**: Maximum 1 cron job per project
+- **Pro plan**: Up to 10 cron jobs, 10-second timeout
+- **Enterprise plan**: Unlimited jobs, longer timeouts
+
+If you need more flexibility, consider GitHub Actions or a dedicated scheduler.
+
+## Option 2: GitHub Actions
+
+Use GitHub Actions for full control over scheduling and execution.
+
+<Steps>
+  <Step title="Create .github/workflows/background-jobs.yml">
+    ```yaml
+    name: Background Jobs
+
+    on:
+      schedule:
+        - cron: '*/15 * * * *'  # Ingestion every 15 minutes
+        - cron: '0 * * * *'     # Prices every hour
+        - cron: '30 * * * *'    # Embeddings every hour at :30
+      workflow_dispatch:        # Allow manual triggers
+
+    jobs:
+      ingest:
+        runs-on: ubuntu-latest
+        if: github.event.schedule == '*/15 * * * *' || github.event_name == 'workflow_dispatch'
+        steps:
+          - name: Trigger ingestion
+            run: |
+              curl -X POST https://your-app.vercel.app/api/ingest \
+                -H "Authorization: Bearer ${{ secrets.INGESTION_SECRET }}" \
+                -H "Content-Type: application/json" \
+                -d '{}'
+
+      prices:
+        runs-on: ubuntu-latest
+        if: github.event.schedule == '0 * * * *' || github.event_name == 'workflow_dispatch'
+        steps:
+          - name: Update prices
+            run: |
+              curl -X POST https://your-app.vercel.app/api/prices \
+                -H "Authorization: Bearer ${{ secrets.INGESTION_SECRET }}" \
+                -H "Content-Type: application/json" \
+                -d '{}'
+
+      embeddings:
+        runs-on: ubuntu-latest
+        if: github.event.schedule == '30 * * * *' || github.event_name == 'workflow_dispatch'
+        steps:
+          - name: Generate embeddings
+            run: |
+              curl -X POST https://your-app.vercel.app/api/embeddings \
+                -H "Authorization: Bearer ${{ secrets.INGESTION_SECRET }}" \
+                -H "Content-Type: application/json" \
+                -d '{}'
+    ```
+  </Step>
+
+  <Step title="Add INGESTION_SECRET to GitHub Secrets">
+    1. Go to your repository **Settings → Secrets and variables → Actions**
+    2. Click **New repository secret**
+    3. Name: `INGESTION_SECRET`
+    4. Value: Your ingestion secret from Vercel environment variables
+  </Step>
+
+  <Step title="Enable GitHub Actions">
+    Commit and push the workflow file. GitHub Actions will automatically start scheduling jobs based on your cron expressions.
+
+    Monitor runs in the **Actions** tab of your repository.
+  </Step>
+</Steps>
+
+## Option 3: External Schedulers
+
+You can use any HTTP-based scheduler to trigger job endpoints:
+
+### EasyCron
+1. Create an account at [easycron.com](https://www.easycron.com)
+2. Add three cron jobs with URLs:
+   - `https://your-app.vercel.app/api/ingest`
+   - `https://your-app.vercel.app/api/prices`
+   - `https://your-app.vercel.app/api/embeddings`
+3. Set the request method to `POST`
+4. Add header: `Authorization: Bearer YOUR_INGESTION_SECRET`
+
+### Render Cron Jobs
+1. Create a Render account and add a new **Cron Job**
+2. Set the command to:
+   ```bash
+   curl -X POST https://your-app.vercel.app/api/ingest \
+     -H "Authorization: Bearer $INGESTION_SECRET"
+   ```
+3. Configure schedule and environment variables
+
+### Fly.io
+1. Deploy a small Node.js worker to Fly.io
+2. Use `node-cron` to schedule HTTP requests to your Vercel endpoints
+3. Scale to zero when idle for cost efficiency
+
+## Monitoring and Debugging
+
+### Check job execution
+Monitor logs in Vercel:
+1. Go to **Project → Logs**
+2. Filter by function: `/api/ingest`, `/api/prices`, `/api/embeddings`
+3. Look for errors, rate limits, or timeout issues
+
+### Manual job triggers
+Test endpoints locally or in production:
+
+```bash
+# Test ingestion
+curl -X POST https://your-app.vercel.app/api/ingest \
+  -H "Authorization: Bearer YOUR_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"}'
+
+# Test prices
+curl -X POST https://your-app.vercel.app/api/prices \
+  -H "Authorization: Bearer YOUR_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Test embeddings
+curl -X POST https://your-app.vercel.app/api/embeddings \
+  -H "Authorization: Bearer YOUR_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"maxRecords": 50}'
+```
+
+### Common issues
+
+**401 Unauthorized**
+- Verify `INGESTION_SECRET` matches between scheduler and Vercel env vars
+- Check for extra whitespace or encoding issues in the secret
+
+**500 Server Error**
+- Check Vercel logs for stack traces
+- Verify database connectivity and RPC provider availability
+- Ensure OpenAI API key is valid (for embeddings)
+
+**Rate limits**
+- CoinGecko free tier: 10-50 requests/minute. Space out price jobs or upgrade.
+- OpenAI embeddings: Tier limits apply. Reduce `EMBEDDING_BATCH_SIZE` if hitting rate limits.
+- RPC providers: Check your plan's requests/second limit.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Production Checklist" icon="clipboard-check" href="/deployment/production-checklist">
+    Review security, monitoring, and performance before going live
+  </Card>
+  <Card title="Deploy to Vercel" icon="rocket" href="/deployment/vercel">
+    Return to the Vercel deployment guide
+  </Card>
+</CardGroup>

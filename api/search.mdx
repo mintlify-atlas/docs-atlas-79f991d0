@@ -1,0 +1,242 @@
+---
+title: Search Transfers
+description: Semantic search for wallet transfers
+---
+
+## GET /api/search
+
+Perform semantic search on transfer data using natural language queries. Results are ranked by similarity and can be filtered by various criteria.
+
+<Info>
+  This endpoint does not require authentication but requires `OPENAI_API_KEY` to be configured.
+</Info>
+
+### Query Parameters
+
+<ParamField query="q" type="string" required>
+  Search query (minimum 3 characters)
+</ParamField>
+
+<ParamField query="address" type="string">
+  Filter results to transfers involving this address (0x-prefixed, 40 hex characters)
+</ParamField>
+
+<ParamField query="chain" type="enum" default="eth">
+  Blockchain network (currently only `"eth"` is supported)
+</ParamField>
+
+<ParamField query="limit" type="number" default="10">
+  Maximum number of results (min: 1, max: 25)
+</ParamField>
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Returns `"ok"` on success
+</ResponseField>
+
+<ResponseField name="data" type="array" required>
+  Array of matching transfer objects, ordered by relevance
+  
+  <Expandable title="Transfer object properties">
+    <ResponseField name="id" type="string">
+      Unique transfer ID
+    </ResponseField>
+    
+    <ResponseField name="score" type="number">
+      Similarity score (0-1, higher is more similar)
+    </ResponseField>
+    
+    <ResponseField name="timestamp" type="string">
+      ISO 8601 timestamp
+    </ResponseField>
+    
+    <ResponseField name="txHash" type="string">
+      Transaction hash
+    </ResponseField>
+    
+    <ResponseField name="from" type="string">
+      Sender address
+    </ResponseField>
+    
+    <ResponseField name="to" type="string">
+      Recipient address
+    </ResponseField>
+    
+    <ResponseField name="amount" type="string">
+      Transfer amount
+    </ResponseField>
+    
+    <ResponseField name="symbol" type="string | null">
+      Token symbol
+    </ResponseField>
+    
+    <ResponseField name="chain" type="string">
+      Blockchain network
+    </ResponseField>
+    
+    <ResponseField name="meta" type="object | null">
+      Additional metadata
+    </ResponseField>
+    
+    <ResponseField name="amountUsd" type="string | null">
+      USD value (null if price unavailable)
+    </ResponseField>
+    
+    <ResponseField name="priceUsd" type="string | null">
+      USD price per token
+    </ResponseField>
+    
+    <ResponseField name="priceTimestamp" type="string | null">
+      ISO 8601 timestamp of price data
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Search Modifiers
+
+The search engine understands various query modifiers:
+
+#### Size Modifiers
+- **Large amounts**: "biggest", "largest", "huge", "massive", "million", "high value"
+- **Small amounts**: "smallest", "tiny", "minimum", "least", "cheap"
+
+#### Time Modifiers
+- **Recent**: "latest", "recent", "newest", "today", "past"
+- **Oldest**: "oldest", "earliest", "first", "beginning", "historic"
+
+#### Direction Modifiers (when address is specified)
+- **Incoming**: "incoming", "received", "deposits", "inflow", "credit"
+- **Outgoing**: "outgoing", "sent", "withdraw", "outflow", "paid"
+
+### Examples
+
+#### Basic semantic search
+
+```bash
+curl "https://your-domain.com/api/search?q=large%20USDC%20transfers&limit=10"
+```
+
+#### Search for specific wallet
+
+```bash
+curl "https://your-domain.com/api/search?q=expensive%20transactions&address=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"
+```
+
+#### Search with direction filter
+
+```bash
+curl "https://your-domain.com/api/search?q=incoming%20payments&address=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb&limit=15"
+```
+
+#### Response Example
+
+```json
+{
+  "status": "ok",
+  "data": [
+    {
+      "id": "cm4a1b2c3d4e5f6g7h8i9j0k",
+      "score": 0.892,
+      "timestamp": "2024-01-15T10:30:00.000Z",
+      "txHash": "0xabc123def456...",
+      "from": "0x1234567890abcdef1234567890abcdef12345678",
+      "to": "0x742d35cc6634c0532925a3b844bc9e7595f0beb",
+      "amount": "5000.000000",
+      "symbol": "USDC",
+      "chain": "eth",
+      "meta": null,
+      "amountUsd": "5000.00",
+      "priceUsd": "1.00",
+      "priceTimestamp": "2024-01-15T10:00:00.000Z"
+    },
+    {
+      "id": "cm4b2c3d4e5f6g7h8i9j0k1l",
+      "score": 0.875,
+      "timestamp": "2024-01-14T15:20:00.000Z",
+      "txHash": "0xdef456abc789...",
+      "from": "0xabcdef1234567890abcdef1234567890abcdef12",
+      "to": "0x9876543210fedcba9876543210fedcba98765432",
+      "amount": "3500.000000",
+      "symbol": "USDC",
+      "chain": "eth",
+      "meta": null,
+      "amountUsd": "3500.00",
+      "priceUsd": "1.00",
+      "priceTimestamp": "2024-01-14T15:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Error Responses
+
+#### Invalid Query Parameters
+
+Status code: `400`
+
+```json
+{
+  "status": "error",
+  "message": "invalid_query_params",
+  "issues": {
+    "fieldErrors": {
+      "q": ["String must contain at least 3 character(s)"]
+    }
+  }
+}
+```
+
+#### OpenAI API Key Not Configured
+
+Status code: `503`
+
+```json
+{
+  "status": "error",
+  "message": "OPENAI_API_KEY is not configured"
+}
+```
+
+#### Internal Error
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "internal_error"
+}
+```
+
+### How It Works
+
+1. **Query embedding**: Your search query is converted to a vector embedding using OpenAI's API
+2. **Vector search**: The embedding is compared against stored transfer embeddings in the database
+3. **Similarity ranking**: Results are ranked by cosine similarity (higher scores = more relevant)
+4. **Intent detection**: Keywords are detected to apply filters and sorting
+5. **Deduplication**: Similar transfers in the same transaction are deduplicated
+6. **Enrichment**: USD values are added using price snapshots
+
+### Search Tips
+
+- **Be specific**: "large USDC deposits" is better than just "transfers"
+- **Use modifiers**: Add "recent", "largest", "incoming" to refine results
+- **Combine terms**: "expensive outgoing payments last week"
+- **Token names**: Include token symbols like "USDC", "ETH", "WBTC"
+- **Actions**: Use terms like "swap", "deposit", "withdraw", "payment"
+
+### Configuration
+
+Required environment variable:
+
+```bash
+OPENAI_API_KEY=sk-...
+```
+
+### Performance Notes
+
+- Results are fetched in batches and filtered/sorted in-memory
+- The endpoint fetches up to 200 candidates (5x the limit) for better ranking
+- Deduplication ensures each transaction appears once in results
+- Vector similarity search uses PostgreSQL's pgvector extension

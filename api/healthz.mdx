@@ -1,0 +1,85 @@
+---
+title: Health Check
+description: Check API and database connectivity
+---
+
+## GET /api/healthz
+
+Check the health status of the API and database connection.
+
+### Request
+
+No parameters required.
+
+```bash
+curl https://your-domain.com/api/healthz
+```
+
+### Response
+
+#### Success Response
+
+Status code: `200`
+
+```json
+{
+  "status": "ok"
+}
+```
+
+<ResponseField name="status" type="string" required>
+  Always returns `"ok"` when the API and database are healthy
+</ResponseField>
+
+#### Error Response
+
+Status code: `500`
+
+```json
+{
+  "status": "error",
+  "message": "database_unreachable"
+}
+```
+
+<ResponseField name="status" type="string" required>
+  Returns `"error"` when the health check fails
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Error description. Returns `"database_unreachable"` when the database connection fails
+</ResponseField>
+
+### Implementation Details
+
+The health check endpoint:
+1. Executes a simple database query (`SELECT 1`)
+2. Returns success if the query completes
+3. Returns error if the database is unreachable
+
+### Use Cases
+
+- **Monitoring**: Set up automated health checks for uptime monitoring
+- **Load balancers**: Configure health check endpoints for load balancing
+- **Startup validation**: Verify the API is ready to handle requests
+- **Debugging**: Quickly diagnose database connectivity issues
+
+### Example Usage
+
+```bash
+# Simple health check
+curl https://your-domain.com/api/healthz
+
+# With status code check
+curl -w "\nHTTP Status: %{http_code}\n" https://your-domain.com/api/healthz
+
+# In a monitoring script
+#!/bin/bash
+response=$(curl -s https://your-domain.com/api/healthz)
+if echo "$response" | grep -q '"status":"ok"'; then
+  echo "API is healthy"
+else
+  echo "API is down!"
+  exit 1
+fi
+```

@@ -1,0 +1,299 @@
+---
+title: Environment Variables
+description: Configure Cogniflow with environment variables for database, authentication, RPC providers, and AI services
+---
+
+## Overview
+
+Cogniflow requires several environment variables to connect to external services. Copy `.env.example` to `.env` and configure the values below.
+
+```bash
+cp .env.example .env
+```
+
+## Database Configuration
+
+<ParamField path="DATABASE_URL" type="string" required>
+  PostgreSQL connection string for Prisma. Used for migrations and queries.
+  
+  **Format:** `postgresql://user:password@host:port/database?schema=public`
+  
+  **Example (Supabase):** `postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres?schema=public&pgbouncer=true`
+</ParamField>
+
+<ParamField path="DIRECT_URL" type="string" required>
+  Direct PostgreSQL connection URL (bypasses connection poolers like PgBouncer). Required for migrations.
+  
+  **Format:** `postgresql://user:password@host:port/database?schema=public`
+  
+  **Example (Supabase):** `postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres?schema=public`
+</ParamField>
+
+<Note>
+  Supabase provides both pooled and direct connection strings. Use the **transaction mode** pooled URL for `DATABASE_URL` and the **direct** URL for `DIRECT_URL`.
+</Note>
+
+## Supabase Authentication
+
+<ParamField path="NEXT_PUBLIC_SUPABASE_URL" type="string" required>
+  Your Supabase project URL. Found in Supabase Dashboard → Settings → API.
+  
+  **Example:** `https://[project-id].supabase.co`
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_SUPABASE_ANON_KEY" type="string" required>
+  Supabase anonymous (public) API key. Found in Supabase Dashboard → Settings → API.
+  
+  This key is safe to expose in the browser and enforces Row Level Security policies.
+</ParamField>
+
+## Blockchain RPC Configuration
+
+<ParamField path="ALCHEMY_API_KEY" type="string">
+  API key for Alchemy RPC services. Used for Ethereum node access.
+  
+  Get your key at [alchemy.com](https://alchemy.com)
+</ParamField>
+
+<ParamField path="INFURA_API_KEY" type="string">
+  API key for Infura RPC services. Alternative to Alchemy.
+  
+  Get your key at [infura.io](https://infura.io)
+</ParamField>
+
+<ParamField path="ETH_RPC_URL" type="string" required>
+  Ethereum JSON-RPC endpoint URL (Sepolia or mainnet).
+  
+  **Examples:**
+  - Alchemy: `https://eth-mainnet.g.alchemy.com/v2/[API_KEY]`
+  - Infura: `https://mainnet.infura.io/v3/[API_KEY]`
+  - Local: `http://localhost:8545`
+</ParamField>
+
+<ParamField path="ETH_CHAIN" type="string" default="eth">
+  Chain identifier for Ethereum network.
+  
+  **Default:** `eth`
+</ParamField>
+
+<ParamField path="ETH_LOOKBACK_BLOCKS" type="number" default="5000">
+  Number of blocks to scan during initial wallet sync when no cursor exists.
+  
+  **Default:** `5000`
+</ParamField>
+
+<ParamField path="SOLANA_RPC_URL" type="string">
+  Solana JSON-RPC endpoint URL (optional, for future Solana support).
+</ParamField>
+
+## RPC Retry Configuration
+
+<ParamField path="RPC_MAX_RETRIES" type="number" default="5">
+  Maximum number of retry attempts for failed RPC calls.
+  
+  **Default:** `5`
+</ParamField>
+
+<ParamField path="RPC_RETRY_BASE_MS" type="number" default="300">
+  Base delay in milliseconds for exponential backoff between retries.
+  
+  **Default:** `300` (300ms)
+</ParamField>
+
+<ParamField path="RPC_RETRY_MAX_MS" type="number" default="4500">
+  Maximum delay in milliseconds for exponential backoff (cap).
+  
+  **Default:** `4500` (4.5 seconds)
+</ParamField>
+
+## OpenAI Embeddings
+
+<ParamField path="OPENAI_API_KEY" type="string" required>
+  OpenAI API key for generating embeddings. Required for semantic search.
+  
+  Get your key at [platform.openai.com](https://platform.openai.com)
+</ParamField>
+
+<ParamField path="OPENAI_BASE_URL" type="string" default="https://api.openai.com/v1">
+  OpenAI API base URL. Change this if using a proxy or Azure OpenAI.
+  
+  **Default:** `https://api.openai.com/v1`
+</ParamField>
+
+<ParamField path="EMBEDDING_MODEL" type="string" default="text-embedding-3-small">
+  OpenAI embedding model to use for vector generation.
+  
+  **Default:** `text-embedding-3-small`
+  
+  **Options:**
+  - `text-embedding-3-small` (768 dimensions, lower cost)
+  - `text-embedding-3-large` (3072 dimensions, higher quality)
+</ParamField>
+
+<ParamField path="EMBEDDING_DIM" type="number" default="768">
+  Vector dimension for embeddings. Must match the model output.
+  
+  **Default:** `768` (for `text-embedding-3-small`)
+</ParamField>
+
+<ParamField path="EMBEDDING_CHAIN" type="string" default="eth">
+  Chain identifier for which to generate embeddings.
+  
+  **Default:** `eth`
+</ParamField>
+
+<ParamField path="EMBEDDING_BATCH_SIZE" type="number" default="32">
+  Number of transfers to process per embedding batch.
+  
+  **Default:** `32`
+</ParamField>
+
+## Price Enrichment (CoinGecko)
+
+<ParamField path="COINGECKO_API_KEY" type="string">
+  CoinGecko API key for fetching token prices. Free tier supported.
+  
+  Get your key at [coingecko.com](https://www.coingecko.com)
+</ParamField>
+
+<ParamField path="PRICE_CHAIN" type="string" default="eth">
+  Chain identifier for price enrichment.
+  
+  **Default:** `eth`
+</ParamField>
+
+<ParamField path="PRICE_BATCH_SIZE" type="number" default="1">
+  Number of tokens to fetch per CoinGecko request. Free tier supports `1`.
+  
+  **Default:** `1`
+</ParamField>
+
+## Ingestion Configuration
+
+<ParamField path="INGESTION_SECRET" type="string" required>
+  Bearer token secret for authenticating ingestion API routes (`/api/ingest`, `/api/prices`, `/api/embeddings`).
+  
+  **Usage:** `Authorization: Bearer <INGESTION_SECRET>`
+  
+  Generate a secure random string (e.g., `openssl rand -hex 32`).
+</ParamField>
+
+<ParamField path="INGESTION_BATCH_SIZE" type="number" default="1">
+  Number of wallets to process per ingestion batch.
+  
+  **Default:** `1`
+</ParamField>
+
+<ParamField path="INGESTION_MAX_PAGES" type="number" default="8">
+  Maximum number of pages to fetch from RPC during scheduled ingestion.
+  
+  **Default:** `8`
+</ParamField>
+
+<ParamField path="INGESTION_MAX_BLOCK_SPAN" type="number" default="50000">
+  Maximum block range to scan in a single ingestion run.
+  
+  **Default:** `50000`
+</ParamField>
+
+<ParamField path="INGESTION_SKIP_RECENT_MS" type="number" default="600000">
+  Skip re-ingesting wallets synced within this time window (milliseconds).
+  
+  **Default:** `600000` (10 minutes)
+</ParamField>
+
+## UI-Triggered Sync
+
+<ParamField path="UI_SYNC_MAX_PAGES" type="number" default="2">
+  Maximum RPC pages to fetch during lightweight UI-triggered syncs.
+  
+  **Default:** `2`
+</ParamField>
+
+<ParamField path="UI_SYNC_LOOKBACK_BLOCKS" type="number" default="1500">
+  Block lookback window for UI-triggered syncs.
+  
+  **Default:** `1500`
+</ParamField>
+
+<ParamField path="UI_SYNC_MIN_INTERVAL_MS" type="number" default="300000">
+  Minimum time between UI-triggered syncs for the same wallet (milliseconds).
+  
+  **Default:** `300000` (5 minutes)
+</ParamField>
+
+## Public Configuration
+
+<ParamField path="NEXT_PUBLIC_ETHERSCAN_BASE_URL" type="string" default="https://etherscan.io">
+  Base URL for Etherscan explorer links in the dashboard.
+  
+  **Default:** `https://etherscan.io` (mainnet)
+  
+  **Sepolia:** `https://sepolia.etherscan.io`
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_DEFAULT_CHAIN" type="string" default="eth">
+  Default chain identifier for the UI.
+  
+  **Default:** `eth`
+</ParamField>
+
+## Logging
+
+<ParamField path="LOG_LEVEL" type="string" default="info">
+  Application log level.
+  
+  **Default:** `info`
+  
+  **Options:** `debug`, `info`, `warn`, `error`
+</ParamField>
+
+## Example Configuration
+
+```bash
+# Database
+DATABASE_URL="postgresql://postgres:password@db.project.supabase.co:5432/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres:password@db.project.supabase.co:5432/postgres"
+
+# Supabase Auth
+NEXT_PUBLIC_SUPABASE_URL="https://project.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+# Ethereum RPC
+ALCHEMY_API_KEY="your_alchemy_key"
+ETH_RPC_URL="https://eth-mainnet.g.alchemy.com/v2/your_alchemy_key"
+ETH_CHAIN="eth"
+ETH_LOOKBACK_BLOCKS="5000"
+
+# OpenAI
+OPENAI_API_KEY="sk-proj-..."
+EMBEDDING_MODEL="text-embedding-3-small"
+EMBEDDING_DIM="768"
+
+# CoinGecko
+COINGECKO_API_KEY="your_coingecko_key"
+
+# Ingestion
+INGESTION_SECRET="your_random_secret_token"
+
+# Public
+NEXT_PUBLIC_ETHERSCAN_BASE_URL="https://etherscan.io"
+NEXT_PUBLIC_DEFAULT_CHAIN="eth"
+
+# Logging
+LOG_LEVEL="info"
+```
+
+## Production Deployment
+
+When deploying to Vercel:
+
+1. Add all required environment variables in **Project Settings → Environment Variables**
+2. Set `INGESTION_SECRET` as a secure random token
+3. Configure Supabase redirect URLs to include your production domain
+4. Update `NEXT_PUBLIC_ETHERSCAN_BASE_URL` for the correct network
+5. Set up Vercel Cron jobs to call `/api/ingest`, `/api/prices`, and `/api/embeddings` with the `INGESTION_SECRET` header
+
+<Warning>
+  Never commit `.env` files to version control. Always use `.env.example` as a template and keep secrets in environment-specific configurations.
+</Warning>

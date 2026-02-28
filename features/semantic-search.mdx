@@ -1,0 +1,468 @@
+---
+title: Semantic Search
+description: Discover transactions using AI-powered vector embeddings and natural language queries
+---
+
+## Overview
+
+Cogniflow's semantic search feature uses OpenAI embeddings to find transactions that match your natural language description—even if the exact keywords don't appear in the on-chain data. Instead of relying on exact matches (like SQL `LIKE` queries), semantic search understands **intent** and **context**.
+
+<Info>
+  Semantic search is powered by **pgvector** (Postgres vector extension) and **OpenAI's text-embedding-3-small** model. Embeddings are stored as 768-dimensional vectors.
+</Info>
+
+## How It Works
+
+<Steps>
+  <Step title="Transfer serialization">
+    Each ERC-20 transfer is converted to a human-readable string:
+    ```
+    USDT transfer of 1234.56 from 0xabc123... to 0xdef456... on 2026-02-28T15:45:12Z
+    ```
+  </Step>
+  
+  <Step title="Embedding generation">
+    The string is sent to OpenAI's embeddings endpoint, which returns a 768-dimensional vector representing the semantic meaning
+  </Step>
+  
+  <Step title="Vector storage">
+    The embedding is stored in the `tx_embeddings` table with a reference to the original transfer ID
+  </Step>
+  
+  <Step title="Query time">
+    When you search, your query (e.g., "large USDT transfers") is also embedded, and pgvector computes cosine similarity between your query vector and all stored embeddings
+  </Step>
+  
+  <Step title="Ranking & filtering">
+    Results are ranked by similarity score (0-1, where 1 = identical) and optionally filtered/sorted by keywords (amount, time, direction)
+  </Step>
+</Steps>
+
+<Tip>
+  Semantic search is **tolerant of typos and synonyms**. For example, "big payments" will match transfers even if the word "payment" never appears in the data—the model understands "payment" ≈ "transfer".
+</Tip>
+
+## Generating Embeddings
+
+Embeddings are **not created automatically**. You must run the embeddings job after ingestion:
+
+### Via API
+
+```bash
+curl -X POST https://your-app.vercel.app/api/embeddings \
+  -H "Authorization: Bearer <INGESTION_SECRET>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chain": "eth",
+    "maxRecords": 200
+  }'
+```
+
+### Via Scheduled Job
+
+Configure a cron job (Vercel Cron, GitHub Actions, etc.) to run periodically:
+
+<Tabs>
+  <Tab title="Vercel Cron">
+    Add to `vercel.json`:
+    ```json
+    {
+      "crons": [
+        {
+          "path": "/api/embeddings",
+          "schedule": "0 */6 * * *"
+        }
+      ]
+    }
+    ```
+    
+    This runs every 6 hours to vectorize new transfers.
+  </Tab>
+  
+  <Tab title="GitHub Actions">
+    ```yaml
+    name: Generate Embeddings
+    on:
+      schedule:
+        - cron: '0 */6 * * *'
+    jobs:
+      embeddings:
+        runs-on: ubuntu-latest
+        steps:
+          - name: Call embeddings API
+            run: |
+              curl -X POST ${{ secrets.APP_URL }}/api/embeddings \
+                -H "Authorization: Bearer ${{ secrets.INGESTION_SECRET }}" \
+                -H "Content-Type: application/json" \
+                -d '{"chain":"eth","maxRecords":200}'
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  **Cost consideration**: OpenAI charges per token processed. With the free tier, you can generate ~50,000 embeddings per month. For large wallets (10K+ transfers), consider batching or using a paid plan.
+</Warning>
+
+### Job Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `chain` | `eth` | Blockchain to process (currently only `eth` supported) |
+| `maxRecords` | `200` | Max transfers to vectorize per run (limits API usage) |
+| `forceRegenerate` | `false` | Re-embed transfers even if they already have embeddings |
+
+<Note>
+  The job only processes transfers **without** existing embeddings (where `tx_embeddings.id` is `NULL`). To re-embed everything, set `forceRegenerate: true` or delete the `tx_embeddings` table.
+</Note>
+
+## Using Semantic Search
+
+### Via Chat Interface
+
+The easiest way to use semantic search is through the chat panel. Any query with discovery keywords triggers semantic search:
+
+**Example prompts:**
+- "Find large USDT transfers"
+- "Search for transactions to Uniswap"
+- "Show me incoming payments over $5000"
+- "Discover outgoing transfers last week"
+
+<Tip>
+  The chat orchestrator automatically routes these queries to the semantic search tool and formats the results.
+</Tip>
+
+### Via API
+
+For programmatic access, use the `/api/search` endpoint:
+
+<CodeGroup>
+```bash Basic Search
+curl "https://your-app.vercel.app/api/search?q=large+USDT+transfers&address=0xabc123...&chain=eth"
+```
+
+```bash Filtered by Direction
+curl "https://your-app.vercel.app/api/search?q=incoming+payments+over+5000&address=0xabc123...&chain=eth&limit=10"
+```
+
+```bash Global Search (All Wallets)
+curl "https://your-app.vercel.app/api/search?q=Aave+liquidations&chain=eth&limit=25"
+```
+</CodeGroup>
+
+### Query Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `q` | Yes | Natural language search query (min 3 chars) |
+| `address` | No | Filter results to transfers involving this wallet (omit for global search) |
+| `chain` | No | Blockchain (default: `eth`) |
+| `limit` | No | Max results (default: 10, max: 25) |
+
+### Response Format
+
+```json
+{
+  "status": "ok",
+  "data": [
+    {
+      "id": "0x123abc...def:42",
+      "score": 0.923,
+      "timestamp": "2026-02-28T15:45:12.000Z",
+      "txHash": "0x123abc...",
+      "from": "0xabc123...",
+      "to": "0xdef456...",
+      "amount": "1234.56",
+      "symbol": "USDT",
+      "chain": "eth",
+      "amountUsd": "1234.56",
+      "priceUsd": "1.00",
+      "priceTimestamp": "2026-02-28T15:00:00.000Z",
+      "meta": null
+    }
+  ]
+}
+```
+
+## Advanced Filtering
+
+The search endpoint automatically applies smart filters based on keywords in your query:
+
+### Amount-Based Ranking
+
+<Tabs>
+  <Tab title="Largest Transfers">
+    **Keywords**: `largest`, `biggest`, `huge`, `massive`, `high`, `million`, `big`, `heavy`, `volume`, `value`, `usd`
+    
+    **Behavior**: Results are sorted by USD value (or token amount if no price) **descending**
+    
+    **Example**: "Show me the largest USDT transfers" → Returns highest-value transfers first
+  </Tab>
+  
+  <Tab title="Smallest Transfers">
+    **Keywords**: `smallest`, `lowest`, `small`, `tiny`, `min`, `minimum`, `least`, `cheap`
+    
+    **Behavior**: Results are sorted by value **ascending**
+    
+    **Example**: "Find the smallest ETH transfer" → Returns lowest-value transfer first
+  </Tab>
+</Tabs>
+
+### Time-Based Ranking
+
+<Tabs>
+  <Tab title="Latest Transfers">
+    **Keywords**: `latest`, `recent`, `newest`, `today`, `past`, `recently`, `most recent`
+    
+    **Behavior**: Results are sorted by timestamp **descending**
+    
+    **Example**: "Most recent USDC transfers" → Returns newest transactions first
+  </Tab>
+  
+  <Tab title="Oldest Transfers">
+    **Keywords**: `oldest`, `earliest`, `first`, `beginning`, `historic`
+    
+    **Behavior**: Results are sorted by timestamp **ascending**
+    
+    **Example**: "First time I used DAI" → Returns the earliest DAI transfer
+  </Tab>
+</Tabs>
+
+### Direction Filtering
+
+<Info>
+  Direction filters only apply when you specify an `address` parameter. Global searches ignore direction keywords.
+</Info>
+
+<Tabs>
+  <Tab title="Incoming Only">
+    **Keywords**: `incoming`, `received`, `receive`, `deposits`, `deposit`, `inflow`, `credit`, `from others`
+    
+    **Behavior**: Filters to transfers where `to_addr = your_address`
+    
+    **Example**: "Incoming USDT payments" → Only shows credits
+  </Tab>
+  
+  <Tab title="Outgoing Only">
+    **Keywords**: `outgoing`, `sent`, `send`, `spent`, `withdraw`, `withdrawal`, `outflow`, `debit`, `to others`, `paid`
+    
+    **Behavior**: Filters to transfers where `from_addr = your_address`
+    
+    **Example**: "Outgoing payments to Binance" → Only shows debits
+  </Tab>
+</Tabs>
+
+<Warning>
+  **Conflicting keywords**: If your query includes both incoming and outgoing keywords (e.g., "incoming and outgoing USDT"), no direction filter is applied—all transfers are returned.
+</Warning>
+
+## Deduplication Logic
+
+Semantic search can return multiple matches for the same transaction (e.g., if a transfer has multiple log entries). To avoid duplicates:
+
+1. **Keying**: Each result is keyed by `txHash-direction-symbol` (or `txHash-symbol` for global searches)
+2. **Winner selection**: If multiple rows share the same key, the one with the **higher USD value** (or similarity score if tied) is kept
+3. **Final limit**: After deduplication, the top N results (by ranking strategy) are returned
+
+<Tip>
+  This means you'll never see the same transaction twice in search results, even if the underlying query fetches 5x your limit.
+</Tip>
+
+## Similarity Scores
+
+Each result includes a `score` field (0-1) indicating how well it matches your query:
+
+| Score | Interpretation |
+|-------|----------------|
+| **0.9 - 1.0** | Excellent match (query and transfer are nearly identical in meaning) |
+| **0.8 - 0.9** | Good match (strong semantic similarity) |
+| **0.7 - 0.8** | Moderate match (related but not identical) |
+| **< 0.7** | Weak match (may be false positive) |
+
+<Note>
+  The search endpoint automatically fetches 5x your requested limit (up to 200 results) and then ranks/filters/deduplicates to ensure you get the best N matches.
+</Note>
+
+## Example Queries
+
+<AccordionGroup>
+  <Accordion title="High-value transfers">
+    **Query**: `"large USDT transfers"`
+    
+    **Matched intent**:
+    - `large` → Sort by USD value descending
+    - `USDT` → Semantic match on symbol
+    
+    **Result**: Top 10 highest-value USDT transfers, ranked by amount
+  </Accordion>
+  
+  <Accordion title="Recent activity">
+    **Query**: `"latest transactions"`
+    
+    **Matched intent**:
+    - `latest` → Sort by timestamp descending
+    
+    **Result**: 10 most recent transfers of any token
+  </Accordion>
+  
+  <Accordion title="Incoming deposits">
+    **Query**: `"incoming payments over 5000"`
+    
+    **Matched intent**:
+    - `incoming` → Filter to credits
+    - `over 5000` → Semantic match (embeddings capture numeric context)
+    
+    **Result**: Recent incoming transfers, ranked by similarity to "over 5000"
+  </Accordion>
+  
+  <Accordion title="Contract interactions">
+    **Query**: `"transfers to Uniswap"`
+    
+    **Matched intent**:
+    - `Uniswap` → Semantic match on `to_addr` (if Uniswap contracts appear in transfer descriptions)
+    
+    **Result**: Transfers where the recipient address is a known Uniswap contract
+  </Accordion>
+  
+  <Accordion title="Historical milestones">
+    **Query**: `"first DAI transfer"`
+    
+    **Matched intent**:
+    - `first` → Sort by timestamp ascending
+    - `DAI` → Semantic match on symbol
+    
+    **Result**: The earliest DAI transfer in your history
+  </Accordion>
+</AccordionGroup>
+
+## Limitations
+
+<Warning>
+  Semantic search has some constraints:
+  
+  - **No exact pattern matching**: Cannot search by specific addresses, tx hashes, or block numbers (use SQL queries for that)
+  - **Context window**: Embeddings are generated from transfer strings only—they don't include contract names, ENS names, or off-chain metadata
+  - **Stale embeddings**: If you re-sync a wallet and transfer data changes, embeddings are **not** regenerated unless you run the job with `forceRegenerate: true`
+  - **No aggregation**: Cannot compute sums, averages, or totals (use SQL tools or the dashboard for analytics)
+</Warning>
+
+### When to Use SQL Instead
+
+Use deterministic SQL queries (via the chat interface or `/tool/sql` endpoint) for:
+- **Exact filters**: "Transfers to address 0xabc123..."
+- **Aggregations**: "Total incoming volume last month"
+- **Complex joins**: "Show all transfers for tokens I hold"
+
+Use semantic search for:
+- **Discovery**: "Find unusual activity"
+- **Fuzzy matching**: "Large payments to exchanges"
+- **Natural language**: "Transactions involving Aave liquidations"
+
+## Performance Tuning
+
+### Index Optimization
+
+The `tx_embeddings` table uses a **pgvector IVFFlat index** for fast similarity search:
+
+```sql
+CREATE INDEX idx_tx_embeddings_vector ON tx_embeddings 
+USING ivfflat (embedding vector_cosine_ops) 
+WITH (lists = 100);
+```
+
+<Tip>
+  If you have 100K+ embeddings, increase the `lists` parameter (recommended: `sqrt(row_count)`). Rebuild the index after changes:
+  ```sql
+  REINDEX INDEX idx_tx_embeddings_vector;
+  ```
+</Tip>
+
+### Batch Size
+
+The embeddings job processes transfers in batches to avoid rate limits:
+
+- Default batch size: `200` transfers per run
+- To process more: Increase `maxRecords` in the API call or run the job multiple times
+- To avoid OpenAI rate limits: Decrease `maxRecords` to `50` or `100`
+
+<Note>
+  OpenAI's free tier allows ~3,000 requests/day for embeddings. At 200 transfers/job and 4 runs/day, you can vectorize ~800 transfers daily.
+</Note>
+
+## Embedding Model Details
+
+| Property | Value |
+|----------|-------|
+| **Model** | `text-embedding-3-small` (configurable via `EMBEDDING_MODEL`) |
+| **Dimensions** | `768` (configurable via `EMBEDDING_DIM`) |
+| **Normalization** | Vectors are truncated/padded to match `EMBEDDING_DIM` |
+| **Endpoint** | `https://api.openai.com/v1/embeddings` (or `OPENAI_BASE_URL`) |
+| **Cost** | ~$0.00002 per 1K tokens (as of Feb 2026) |
+
+<Info>
+  To use a different embedding model (e.g., `text-embedding-3-large` with 3072 dimensions), update `EMBEDDING_MODEL` and `EMBEDDING_DIM` in your environment, then regenerate all embeddings.
+</Info>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Search returns no results">
+    Possible causes:
+    - **No embeddings**: Run `POST /api/embeddings` to generate vectors
+    - **Query too specific**: Broaden your search (e.g., "USDT transfers" instead of "1234.56 USDT transfer to 0xabc on Feb 15")
+    - **No matching transfers**: Your wallet may not have activity matching the semantic context
+    
+    **Debug**: Check the raw SQL query by inspecting the `tx_embeddings` table:
+    ```sql
+    SELECT COUNT(*) FROM tx_embeddings WHERE id IN (
+      SELECT id FROM transfers WHERE chain = 'eth'
+    );
+    ```
+    If count is 0, no embeddings exist.
+  </Accordion>
+  
+  <Accordion title="Similarity scores are all below 0.7">
+    This usually means your query is too vague or uses unfamiliar terminology. Try:
+    - Adding more context: "large USDT transfers to exchanges" instead of "big payments"
+    - Using common terms: "incoming deposits" instead of "receivables"
+    - Checking for typos: "USDC" not "USCD"
+  </Accordion>
+  
+  <Accordion title="Results are missing recent transfers">
+    Embeddings are only generated for transfers that existed **before** the job ran. To include new transfers:
+    1. Wait for the next scheduled embeddings job
+    2. Or manually trigger: `POST /api/embeddings`
+  </Accordion>
+  
+  <Accordion title="OpenAI API errors">
+    Common issues:
+    - **401 Unauthorized**: `OPENAI_API_KEY` is missing or invalid
+    - **429 Rate Limit**: You've exceeded the free tier quota (upgrade or reduce `maxRecords`)
+    - **500 Internal Error**: OpenAI service outage (check status.openai.com)
+    
+    **Logs**: Check the embeddings job response for detailed error messages.
+  </Accordion>
+</AccordionGroup>
+
+## Roadmap
+
+<Info>
+  Planned enhancements for semantic search:
+  
+  - **ENS name resolution** in embeddings (e.g., "transfers to vitalik.eth")
+  - **Contract metadata enrichment** (embed verified contract names from Etherscan)
+  - **Multi-chain support** (index transfers from Polygon, Arbitrum, etc.)
+  - **Custom embedding models** (support for local/private models via Ollama or GGUF)
+  - **Semantic aggregations** ("total value of payments to DeFi protocols")
+</Info>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Chat Interface" href="/features/chat-interface" icon="messages">
+    Use semantic search via natural language questions
+  </Card>
+  
+  <Card title="Dashboard" href="/features/dashboard" icon="chart-line">
+    View portfolio analytics and transfer history
+  </Card>
+</CardGroup>

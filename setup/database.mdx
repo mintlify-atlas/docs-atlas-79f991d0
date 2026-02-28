@@ -1,0 +1,445 @@
+---
+title: Database Configuration
+description: Set up PostgreSQL with Prisma, run migrations, and configure pgvector for semantic search
+---
+
+## Overview
+
+Cogniflow uses **PostgreSQL** with the **pgvector** extension for storing blockchain data and enabling semantic search over transactions. Prisma manages the schema and migrations.
+
+## Database Requirements
+
+- PostgreSQL 14+ (Supabase recommended)
+- pgvector extension for vector embeddings
+- Connection pooling support (PgBouncer)
+
+## Supabase Setup (Recommended)
+
+<Steps>
+  <Step title="Create a Supabase project">
+    1. Sign up at [supabase.com](https://supabase.com)
+    2. Create a new project
+    3. Choose a strong database password
+    4. Select a region close to your users
+  </Step>
+
+  <Step title="Get connection strings">
+    Navigate to **Settings → Database** and copy:
+
+    - **Connection string (Session mode)** → Use for `DIRECT_URL`
+    - **Connection string (Transaction mode)** → Use for `DATABASE_URL`
+
+    <Note>
+      Transaction mode uses PgBouncer for connection pooling. Session mode is required for migrations and DDL operations.
+    </Note>
+  </Step>
+
+  <Step title="Configure environment variables">
+    Add both connection strings to your `.env` file:
+
+    ```bash
+    DATABASE_URL="postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres?pgbouncer=true&schema=public"
+    DIRECT_URL="postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres?schema=public"
+    ```
+  </Step>
+</Steps>
+
+## Prisma Configuration
+
+The Prisma schema is located at `prisma/schema.prisma`:
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+```
+
+### Schema Design
+
+Cogniflow's database includes 6 core tables:
+
+1. **users** - User accounts (linked to Supabase Auth)
+2. **wallets** - Tracked Ethereum wallets per user
+3. **blocks** - Indexed Ethereum blocks
+4. **transfers** - ERC-20 transfer events
+5. **tx_embeddings** - Vector embeddings for semantic search
+6. **prices** - Token price snapshots from CoinGecko
+
+## Running Migrations
+
+<Steps>
+  <Step title="Initial migration">
+    Run the initial migration to create all tables and enable pgvector:
+
+    ```bash
+    npx prisma migrate dev
+    ```
+
+    This migration:
+    - Creates the `extensions` schema
+    - Enables the `vector` extension
+    - Creates all tables with proper indexes
+    - Sets up foreign key relationships
+  </Step>
+
+  <Step title="Generate Prisma Client">
+    After migrations, generate the Prisma Client:
+
+    ```bash
+    npx prisma generate
+    ```
+
+    Run this command whenever you modify `schema.prisma`.
+  </Step>
+
+  <Step title="Verify migration">
+    Check the migration was successful:
+
+    ```bash
+    npx prisma db push --skip-generate
+    ```
+
+    Or connect to your database and verify tables exist:
+
+    ```sql
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public';
+    ```
+  </Step>
+</Steps>
+
+## pgvector Extension
+
+The initial migration enables pgvector for semantic search:
+
+```sql
+create schema if not exists extensions;
+create extension if not exists vector with schema extensions;
+
+set search_path = public, extensions;
+```
+
+### Vector Embeddings Table
+
+The `tx_embeddings` table stores 768-dimensional vectors:
+
+```prisma
+model TxEmbedding {
+  id        String                     @id
+  embedding Unsupported("vector(768)")
+  meta      Json?
+  createdAt DateTime                   @default(now()) @map("created_at")
+  transfer  Transfer                   @relation(fields: [id], references: [id], onDelete: Cascade)
+
+  @@map("tx_embeddings")
+}
+```
+
+**Vector dimension:** 768 (matches `text-embedding-3-small`)
+
+<Warning>
+  If you change the `EMBEDDING_MODEL` to `text-embedding-3-large`, you must update the vector dimension to `3072` and create a new migration.
+</Warning>
+
+## Database Schema
+
+### Users Table
+
+Stores user accounts linked to Supabase Auth:
+
+```prisma
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  wallets   Wallet[]
+
+  @@map("users")
+}
+```
+
+### Wallets Table
+
+Tracks Ethereum wallets per user with sync metadata:
+
+```prisma
+model Wallet {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  chain           String
+  address         String
+  lastSyncedBlock Int?      @map("last_synced_block")
+  lastSyncedAt    DateTime? @map("last_synced_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chain, address])
+  @@map("wallets")
+}
+```
+
+**Unique constraint:** A user cannot track the same wallet (chain + address) twice.
+
+### Blocks Table
+
+Caches indexed Ethereum blocks:
+
+```prisma
+model Block {
+  number     Int        @id
+  hash       String     @unique
+  parentHash String     @map("parent_hash")
+  timestamp  DateTime
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  transfers  Transfer[]
+
+  @@map("blocks")
+}
+```
+
+### Transfers Table
+
+Stores ERC-20 transfer events:
+
+```prisma
+model Transfer {
+  id          String       @id
+  blockNumber Int?         @map("block_number")
+  timestamp   DateTime
+  txHash      String       @map("tx_hash")
+  logIndex    Int          @map("log_index")
+  token       String
+  fromAddr    String       @map("from_addr")
+  toAddr      String       @map("to_addr")
+  amountRaw   Decimal      @map("amount_raw") @db.Decimal(78, 0)
+  amountDec   Decimal      @map("amount_dec") @db.Decimal(78, 18)
+  symbol      String?
+  decimals    Int?
+  chain       String
+  stale       Boolean      @default(false)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  block       Block?       @relation(fields: [blockNumber], references: [number])
+  embedding   TxEmbedding?
+
+  @@index([toAddr])
+  @@index([fromAddr])
+  @@index([token])
+  @@index([blockNumber])
+  @@map("transfers")
+}
+```
+
+**Key fields:**
+- `id` - Composite key: `${txHash}:${logIndex}`
+- `amountRaw` - Raw token amount (no decimals)
+- `amountDec` - Decimal-adjusted amount
+- `stale` - Marks outdated data during reorgs
+
+**Indexes:** Optimized for queries by address, token, and block.
+
+### Prices Table
+
+Stores USD price snapshots from CoinGecko:
+
+```prisma
+model PriceSnapshot {
+  chain     String
+  token     String
+  timestamp DateTime @map("ts")
+  usd       Decimal  @db.Decimal(38, 10)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([chain, token, timestamp])
+  @@map("prices")
+}
+```
+
+**Composite primary key:** `(chain, token, timestamp)` ensures unique price points.
+
+## Database Seeding
+
+Cogniflow does not include seed data by default. To add test wallets:
+
+```sql
+-- Insert a user (match Supabase Auth UUID)
+INSERT INTO users (id, email) 
+VALUES ('your-supabase-user-id', 'test@example.com');
+
+-- Insert a tracked wallet
+INSERT INTO wallets (id, user_id, chain, address, created_at)
+VALUES (
+  gen_random_uuid(),
+  'your-supabase-user-id',
+  'eth',
+  '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb',
+  NOW()
+);
+```
+
+## Common Operations
+
+### View migration history
+
+```bash
+npx prisma migrate status
+```
+
+### Reset database (development only)
+
+```bash
+npx prisma migrate reset
+```
+
+<Warning>
+  `migrate reset` will **delete all data** and re-run all migrations. Only use in development.
+</Warning>
+
+### Create a new migration
+
+After modifying `schema.prisma`:
+
+```bash
+npx prisma migrate dev --name describe_your_change
+```
+
+### Deploy migrations (production)
+
+```bash
+npx prisma migrate deploy
+```
+
+### Open Prisma Studio
+
+Visual database browser:
+
+```bash
+npx prisma studio
+```
+
+## Indexes and Performance
+
+Cogniflow includes optimized indexes:
+
+- **transfers**: `toAddr`, `fromAddr`, `token`, `blockNumber`
+- **blocks**: `hash` (unique)
+- **wallets**: `(userId, chain, address)` (unique)
+- **users**: `email` (unique)
+
+### Vector Search Performance
+
+For large datasets, consider adding an IVFFlat index to `tx_embeddings`:
+
+```sql
+CREATE INDEX ON tx_embeddings USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+```
+
+<Note>
+  IVFFlat indexes improve performance for approximate nearest neighbor searches on large embedding tables (10k+ rows).
+</Note>
+
+## Connection Pooling
+
+Supabase uses PgBouncer for connection pooling:
+
+- **Transaction mode** (pooled): Use for queries - `DATABASE_URL`
+- **Session mode** (direct): Use for migrations - `DIRECT_URL`
+
+### Connection Limits
+
+Supabase free tier limits:
+- **Direct connections:** 60
+- **Pooled connections:** 200
+
+Monitor connections:
+
+```sql
+SELECT count(*) FROM pg_stat_activity;
+```
+
+## Backup and Recovery
+
+Supabase provides automated backups:
+
+1. Navigate to **Database → Backups** in Supabase Dashboard
+2. Daily backups are retained for 7 days (free tier)
+3. Restore from backup if needed
+
+### Manual Backup
+
+```bash
+pg_dump "postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres" > backup.sql
+```
+
+### Restore from Backup
+
+```bash
+psql "postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres" < backup.sql
+```
+
+## Troubleshooting
+
+### Migration fails: "extension vector does not exist"
+
+- Ensure pgvector is enabled in Supabase
+- Run manually: `CREATE EXTENSION IF NOT EXISTS vector;`
+- Verify with: `SELECT * FROM pg_extension WHERE extname = 'vector';`
+
+### Connection timeout
+
+- Check `DATABASE_URL` and `DIRECT_URL` are correct
+- Verify firewall allows connections to Supabase
+- Test connection: `npx prisma db pull`
+
+### "Prepared statement already exists"
+
+- Switch `DATABASE_URL` to use `?pgbouncer=true` (transaction mode)
+- Use `DIRECT_URL` for migrations only
+
+### Schema out of sync
+
+```bash
+# Pull current database schema
+npx prisma db pull
+
+# Push schema changes without migration
+npx prisma db push
+```
+
+## Production Checklist
+
+<Steps>
+  <Step title="Enable connection pooling">
+    Use PgBouncer transaction mode for `DATABASE_URL`.
+  </Step>
+
+  <Step title="Set up automated backups">
+    Configure daily backups in Supabase (included in paid plans).
+  </Step>
+
+  <Step title="Monitor connection usage">
+    Set up alerts for connection limits in Supabase Dashboard.
+  </Step>
+
+  <Step title="Optimize indexes">
+    Add IVFFlat index for `tx_embeddings` if dataset grows beyond 10k rows.
+  </Step>
+
+  <Step title="Run migrations in CI/CD">
+    Add `npx prisma migrate deploy` to your deployment pipeline.
+  </Step>
+</Steps>
+
+## Next Steps
+
+- Configure [Environment Variables](/setup/environment-variables) for RPC and API keys
+- Set up [Authentication](/setup/authentication) with Supabase Auth
+- Start ingesting data with the worker jobs
+- Explore the API routes for transfers, portfolio, and semantic search

@@ -1,0 +1,309 @@
+---
+title: Vector embeddings
+description: How Cogniflow enables semantic search with OpenAI and pgvector
+---
+
+Cogniflow uses **vector embeddings** to power semantic search over blockchain transactions. This allows users to query transfers using natural language like "large stablecoin movements" or "gas refunds" without exact keyword matching.
+
+## Architecture
+
+The semantic search system has three components:
+
+1. **OpenAI Embeddings API** - Converts transaction text into 768-dimensional vectors
+2. **pgvector** - PostgreSQL extension for storing and querying vectors
+3. **Similarity search** - Cosine similarity ranking to find relevant transfers
+
+## How it works
+
+<Steps>
+  <Step title="Generate embeddings">
+    The background job (`/api/embeddings`) converts each transfer into a text description and sends it to OpenAI's `text-embedding-3-small` model.
+  </Step>
+  
+  <Step title="Store in database">
+    The resulting 768-dimensional vector is stored in the `tx_embeddings` table using pgvector's `vector(768)` type.
+  </Step>
+  
+  <Step title="Query with natural language">
+    When a user searches, their query is also embedded using the same model.
+  </Step>
+  
+  <Step title="Find similar vectors">
+    pgvector's cosine similarity operator (`<=>`) ranks transfers by vector distance.
+  </Step>
+  
+  <Step title="Return results">
+    The top N most similar transfers are returned to the user.
+  </Step>
+</Steps>
+
+## Database schema
+
+The `TxEmbedding` model stores vectors:
+
+```prisma
+model TxEmbedding {
+  id        String                     @id
+  embedding Unsupported("vector(768)")
+  meta      Json?
+  createdAt DateTime                   @default(now()) @map("created_at")
+  transfer  Transfer                   @relation(fields: [id], references: [id], onDelete: Cascade)
+
+  @@map("tx_embeddings")
+}
+```
+
+**Key points:**
+- `id` is a foreign key to `transfers.id`
+- `embedding` is a 768-dimensional vector (pgvector)
+- `meta` can store additional metadata (optional)
+- One-to-one relationship with `Transfer`
+
+## Enabling pgvector
+
+Before using embeddings, enable the pgvector extension in PostgreSQL:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+For **Supabase**, run this in the SQL Editor or ensure it's in your migration.
+
+<Info>
+  Most managed Postgres providers (Supabase, Neon, Railway) support pgvector out of the box.
+</Info>
+
+## Embedding generation
+
+### Transfer text formatting
+
+Each transfer is converted to a human-readable string before embedding:
+
+```typescript
+const transferText = `Transfer ${amount} ${symbol} from ${fromAddr} to ${toAddr} at ${timestamp}`;
+```
+
+Example:
+```
+Transfer 1500.00 USDC from 0x123...abc to 0x456...def at 2024-01-15 14:30:00
+```
+
+### OpenAI API call
+
+```typescript
+const response = await fetch("https://api.openai.com/v1/embeddings", {
+  method: "POST",
+  headers: {
+    "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "text-embedding-3-small",
+    input: [transferText],
+  }),
+});
+
+const { data } = await response.json();
+const embedding = data[0].embedding; // 768-dimensional array
+```
+
+### Batch processing
+
+To reduce API calls, embeddings are generated in batches:
+
+```typescript
+const BATCH_SIZE = 32; // EMBEDDING_BATCH_SIZE from env
+
+for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
+  const batch = transfers.slice(i, i + BATCH_SIZE);
+  const texts = batch.map(formatTransferText);
+  const embeddings = await generateEmbeddings(texts);
+  await storeEmbeddings(batch, embeddings);
+}
+```
+
+<Tip>
+  OpenAI's embedding API supports up to 2048 inputs per request, but smaller batches (32-64) are more reliable.
+</Tip>
+
+## Semantic search query
+
+### Query embedding
+
+When a user searches, their query is embedded using the same model:
+
+```typescript
+const queryEmbedding = await generateEmbedding("large stablecoin transfers");
+```
+
+### Similarity search
+
+Use pgvector's cosine distance operator (`<=>`) to find similar transfers:
+
+```sql
+SELECT
+  t.*,
+  (e.embedding <=> $1) AS distance
+FROM transfers t
+INNER JOIN tx_embeddings e ON e.id = t.id
+WHERE t.chain = $2
+ORDER BY e.embedding <=> $1
+LIMIT 50;
+```
+
+**Explanation:**
+- `$1` is the query embedding vector
+- `<=>` computes cosine distance (lower = more similar)
+- Results are ranked by similarity
+- Optional `WHERE` filters by chain, address, etc.
+
+<Info>
+  **Cosine distance** ranges from 0 (identical) to 2 (opposite). Most relevant results have distance < 0.5.
+</Info>
+
+## Configuration
+
+<ParamField path="OPENAI_API_KEY" type="string" required>
+  Your OpenAI API key for embedding generation
+</ParamField>
+
+<ParamField path="EMBEDDING_MODEL" type="string" default="text-embedding-3-small">
+  OpenAI model to use (options: `text-embedding-3-small`, `text-embedding-3-large`)
+</ParamField>
+
+<ParamField path="EMBEDDING_DIM" type="number" default="768">
+  Vector dimensions. Must match:
+  - `text-embedding-3-small`: 768 or 1536 dimensions
+  - `text-embedding-3-large`: 3072 dimensions
+</ParamField>
+
+<ParamField path="EMBEDDING_BATCH_SIZE" type="number" default="32">
+  Number of transfers to embed per API call
+</ParamField>
+
+<Warning>
+  Changing `EMBEDDING_DIM` requires a database migration to update the `vector(768)` type.
+</Warning>
+
+## Performance optimization
+
+### Indexing
+
+For large datasets, create an **IVFFlat index** on the embedding column:
+
+```sql
+CREATE INDEX tx_embeddings_ivfflat_idx
+ON tx_embeddings
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+```
+
+**Benefits:**
+- Faster similarity searches (approximate nearest neighbor)
+- Scales to millions of vectors
+
+**Tradeoffs:**
+- Slightly less accurate than exact search
+- Requires periodic index rebuilding
+
+<Tip>
+  Only create indexes after you have at least 10,000 embeddings. Smaller datasets don't benefit.
+</Tip>
+
+### Filtering before search
+
+Narrow the search space with `WHERE` clauses:
+
+```sql
+WHERE t.chain = 'eth'
+  AND t.timestamp > NOW() - INTERVAL '30 days'
+  AND (t.from_addr = $address OR t.to_addr = $address)
+```
+
+This reduces the number of vectors to compare.
+
+## Cost estimation
+
+**OpenAI Pricing** (as of 2024):
+- `text-embedding-3-small`: $0.02 per 1M tokens
+- Average transfer text: ~50 tokens
+- **Cost per 1M transfers:** ~$1
+
+<Info>
+  Embeddings are generated **once per transfer** and reused for all searches, making the cost negligible for most use cases.
+</Info>
+
+## Example: Semantic search API
+
+The `/api/search` endpoint demonstrates the full workflow:
+
+```typescript
+// 1. Embed the query
+const queryEmbedding = await generateEmbedding(query);
+
+// 2. Search for similar transfers
+const results = await prisma.$queryRaw`
+  SELECT
+    t.id,
+    t.tx_hash,
+    t.from_addr,
+    t.to_addr,
+    t.amount_dec,
+    t.symbol,
+    t.timestamp,
+    (e.embedding <=> ${queryEmbedding}::vector) AS distance
+  FROM transfers t
+  INNER JOIN tx_embeddings e ON e.id = t.id
+  WHERE t.chain = ${chain}
+    AND (t.from_addr = ${address} OR t.to_addr = ${address})
+  ORDER BY e.embedding <=> ${queryEmbedding}::vector
+  LIMIT 50
+`;
+
+// 3. Return ranked results
+return results.map(r => ({
+  ...r,
+  relevanceScore: 1 - (r.distance / 2), // Convert distance to 0-1 score
+}));
+```
+
+<Tip>
+  Combine semantic search with **keyword filtering** for best results. Use embeddings for discovery, filters for precision.
+</Tip>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Error: extension 'vector' does not exist">
+    Enable pgvector in your database:
+    ```sql
+    CREATE EXTENSION IF NOT EXISTS vector;
+    ```
+    For Supabase, run this in the SQL Editor.
+  </Accordion>
+  
+  <Accordion title="Embeddings are slow to generate">
+    Increase `EMBEDDING_BATCH_SIZE` to process more transfers per API call (max 2048).
+  </Accordion>
+  
+  <Accordion title="Search results are irrelevant">
+    - Ensure you're using the **same model** for query and transfer embeddings
+    - Check that embeddings were generated correctly (not all zeros)
+    - Add filters to narrow the search space
+  </Accordion>
+  
+  <Accordion title="Database error: invalid vector dimensions">
+    Your Prisma schema specifies `vector(768)` but you're using a different `EMBEDDING_DIM`. Update the schema or change the env var.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="LLM tools" icon="code" href="/dev/llm-tools">
+    Learn how the chat agent uses semantic search
+  </Card>
+  <Card title="Semantic search API" icon="magnifying-glass" href="/api/search">
+    Explore the search endpoint documentation
+  </Card>
+</CardGroup>

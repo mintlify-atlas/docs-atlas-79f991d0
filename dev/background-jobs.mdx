@@ -1,0 +1,358 @@
+---
+title: Background jobs
+description: How ingestion, price updates, and embedding generation work
+---
+
+Cogniflow runs three background jobs to keep data fresh:
+
+1. **Ingestion** - Syncs ERC-20 transfers from Ethereum
+2. **Price updates** - Fetches USD prices from CoinGecko
+3. **Embedding generation** - Creates OpenAI vector embeddings for semantic search
+
+## Job overview
+
+| Job | Script | API Endpoint | Frequency |
+|-----|--------|--------------|----------|
+| **Ingestion** | `worker/src/indexer.ts` | `POST /api/ingest` | Every 15 minutes |
+| **Prices** | `worker/src/jobs/updatePrices.ts` | `POST /api/prices` | Hourly |
+| **Embeddings** | `worker/src/jobs/updateEmbeddings.ts` | `POST /api/embeddings` | Hourly |
+
+## Ingestion job
+
+### Purpose
+
+Syncs ERC-20 `Transfer` events for all tracked wallets.
+
+### Local execution
+
+```bash
+npm run start -w worker
+```
+
+### API endpoint
+
+```bash
+curl -X POST https://your-app.vercel.app/api/ingest \
+  -H "Authorization: Bearer YOUR_INGESTION_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Optional payload:**
+
+```json
+{
+  "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1"
+}
+```
+
+If `address` is provided, only that wallet is synced.
+
+### Configuration
+
+<ParamField path="ETH_RPC_URL" type="string" required>
+  Ethereum RPC endpoint (Alchemy, Infura, etc.)
+</ParamField>
+
+<ParamField path="ETH_LOOKBACK_BLOCKS" type="number" default="5000">
+  Blocks to fetch on initial sync
+</ParamField>
+
+<ParamField path="INGESTION_BATCH_SIZE" type="number" default="1">
+  Number of wallets to sync in parallel
+</ParamField>
+
+<ParamField path="INGESTION_MAX_PAGES" type="number" default="8">
+  Maximum RPC pages to fetch per wallet
+</ParamField>
+
+<ParamField path="INGESTION_MAX_BLOCK_SPAN" type="number" default="50000">
+  Maximum block range per RPC request
+</ParamField>
+
+### How it works
+
+<Steps>
+  <Step title="Load wallets">
+    Query the database for all wallets on the target chain
+  </Step>
+  
+  <Step title="Calculate block range">
+    For each wallet, determine the starting block (from `lastSyncedBlock` or `currentBlock - ETH_LOOKBACK_BLOCKS`)
+  </Step>
+  
+  <Step title="Fetch transfers">
+    Query the RPC node for ERC-20 `Transfer` events in the block range
+  </Step>
+  
+  <Step title="Upsert to database">
+    Insert or update transfers using the composite ID `{txHash}:{logIndex}`
+  </Step>
+  
+  <Step title="Update cursor">
+    Set the wallet's `lastSyncedBlock` to the latest processed block
+  </Step>
+</Steps>
+
+<Info>
+  The ingestion job is **idempotent**. Running it multiple times will not create duplicates.
+</Info>
+
+## Price update job
+
+### Purpose
+
+Fetches current USD prices for all ERC-20 tokens seen in transfers.
+
+### Local execution
+
+```bash
+npm run start:prices -w worker
+```
+
+### API endpoint
+
+```bash
+curl -X POST https://your-app.vercel.app/api/prices \
+  -H "Authorization: Bearer YOUR_INGESTION_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Optional payload:**
+
+```json
+{
+  "chain": "eth",
+  "tokens": ["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"]
+}
+```
+
+### Configuration
+
+<ParamField path="COINGECKO_API_KEY" type="string">
+  CoinGecko API key (optional for free tier)
+</ParamField>
+
+<ParamField path="PRICE_CHAIN" type="string" default="eth">
+  Blockchain to fetch prices for
+</ParamField>
+
+<ParamField path="PRICE_BATCH_SIZE" type="number" default="1">
+  Number of tokens to fetch per API call (free tier only supports 1)
+</ParamField>
+
+### Implementation
+
+**File:** `worker/src/jobs/updatePrices.ts`
+
+```typescript
+import "dotenv/config";
+import pino from "pino";
+import { updatePrices } from "../../shared/jobs/updatePrices";
+import { disconnectPrisma } from "../../shared/prisma";
+
+const log = pino({ level: process.env.LOG_LEVEL || "info" });
+
+async function main() {
+  log.info("Price job starting...");
+  const result = await updatePrices({ logger: log });
+  log.info(
+    {
+      chain: result.chain,
+      processedTokens: result.processedTokens,
+      updated: result.updated,
+      timestamp: result.timestamp.toISOString(),
+    },
+    "Price job finished",
+  );
+}
+
+main()
+  .catch((err) => {
+    log.error({ err }, "Price job crashed");
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await disconnectPrisma();
+    log.debug("Prisma client disconnected");
+  });
+```
+
+### How it works
+
+<Steps>
+  <Step title="Discover tokens">
+    Query the `transfers` table for distinct token addresses on the target chain
+  </Step>
+  
+  <Step title="Fetch prices from CoinGecko">
+    For each token, query the CoinGecko API for current USD price
+  </Step>
+  
+  <Step title="Upsert to database">
+    Insert a new row in the `prices` table with `(chain, token, timestamp, usd)`
+  </Step>
+</Steps>
+
+<Tip>
+  Prices are rounded to the **hour** for efficient time-series queries.
+</Tip>
+
+<Warning>
+  CoinGecko's free tier supports **1 token per request**. If you have a Pro API key, increase `PRICE_BATCH_SIZE` for faster processing.
+</Warning>
+
+## Embedding generation job
+
+### Purpose
+
+Generates OpenAI vector embeddings for transfers that don't have them yet.
+
+### Local execution
+
+```bash
+npm run start:embeddings -w worker
+```
+
+### API endpoint
+
+```bash
+curl -X POST https://your-app.vercel.app/api/embeddings \
+  -H "Authorization: Bearer YOUR_INGESTION_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Optional payload:**
+
+```json
+{
+  "chain": "eth",
+  "maxRecords": 200
+}
+```
+
+### Configuration
+
+<ParamField path="OPENAI_API_KEY" type="string" required>
+  OpenAI API key for embedding generation
+</ParamField>
+
+<ParamField path="EMBEDDING_MODEL" type="string" default="text-embedding-3-small">
+  OpenAI embedding model to use
+</ParamField>
+
+<ParamField path="EMBEDDING_CHAIN" type="string" default="eth">
+  Blockchain to generate embeddings for
+</ParamField>
+
+<ParamField path="EMBEDDING_BATCH_SIZE" type="number" default="32">
+  Number of transfers to embed per API call
+</ParamField>
+
+<ParamField path="EMBEDDING_DIM" type="number" default="768">
+  Vector dimensions (must match pgvector schema)
+</ParamField>
+
+### Implementation
+
+**File:** `worker/src/jobs/updateEmbeddings.ts`
+
+```typescript
+import "dotenv/config";
+import pino from "pino";
+import { updateEmbeddings } from "../../shared/jobs/updateEmbeddings";
+import { disconnectPrisma } from "../../shared/prisma";
+
+const log = pino({ level: process.env.LOG_LEVEL || "info" });
+
+async function main() {
+  log.info("Embedding job starting...");
+  const result = await updateEmbeddings({ logger: log });
+  log.info(
+    {
+      chain: result.chain,
+      processed: result.processed,
+      batches: result.batches,
+    },
+    "Embedding job finished",
+  );
+}
+
+main()
+  .catch((err) => {
+    log.error({ err }, "Embedding job crashed");
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await disconnectPrisma();
+    log.debug("Prisma client disconnected");
+  });
+```
+
+### How it works
+
+<Steps>
+  <Step title="Query pending transfers">
+    Select transfers that don't have an associated `TxEmbedding` record
+  </Step>
+  
+  <Step title="Format transfer text">
+    Convert each transfer into a human-readable string:
+    ```
+    Transfer 1.5 USDC from 0x123... to 0x456... at 2024-01-15 14:30:00
+    ```
+  </Step>
+  
+  <Step title="Call OpenAI Embeddings API">
+    Send batch of transfer texts to OpenAI's embedding endpoint
+  </Step>
+  
+  <Step title="Store vectors">
+    Insert embeddings into the `tx_embeddings` table with pgvector format
+  </Step>
+</Steps>
+
+<Info>
+  Embeddings are **768 dimensions** for `text-embedding-3-small`. Ensure your Prisma schema matches:
+  ```prisma
+  embedding Unsupported("vector(768)")
+  ```
+</Info>
+
+## Scheduling
+
+For production, schedule these jobs via **Vercel Cron**:
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/ingest",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/prices",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/embeddings",
+      "schedule": "30 * * * *"
+    }
+  ]
+}
+```
+
+See [Background jobs deployment](/deployment/background-jobs) for full setup.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Vector embeddings" icon="brain" href="/dev/vector-embeddings">
+    Deep dive into semantic search
+  </Card>
+  <Card title="LLM tools" icon="code" href="/dev/llm-tools">
+    Learn how the chat agent works
+  </Card>
+</CardGroup>
