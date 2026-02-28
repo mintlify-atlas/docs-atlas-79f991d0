@@ -1,0 +1,132 @@
+{
+  "projectType": "saas",
+  "projectName": "Cogniflow",
+  "projectDescription": "On-chain intelligence agent that lets users explore wallet activity through a chat UI and dashboard with LLM-driven analytics.",
+  "theme": "palm",
+  "primaryColor": "#2E7D32",
+  "lightColor": "#66BB6A",
+  "darkColor": "#1B5E20",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Setup & Configuration",
+            "pages": [
+              "setup/installation",
+              "setup/environment-variables",
+              "setup/authentication",
+              "setup/database"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/wallet-tracking",
+              "features/chat-interface",
+              "features/dashboard",
+              "features/semantic-search"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/vercel",
+              "deployment/background-jobs",
+              "deployment/production-checklist"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/healthz",
+              "api/wallets",
+              "api/transfers",
+              "api/portfolio",
+              "api/chat",
+              "api/search",
+              "api/ingest",
+              "api/prices",
+              "api/embeddings"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "api/tools/sql"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Developer Guide",
+        "groups": [
+          {
+            "group": "Architecture",
+            "pages": [
+              "dev/monorepo-structure",
+              "dev/data-model",
+              "dev/indexer"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "dev/background-jobs",
+              "dev/vector-embeddings",
+              "dev/llm-tools"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "dev/contributing",
+              "dev/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Ethereum wallet activity tracking and indexing",
+    "LLM-powered chat interface with SQL and semantic search tools",
+    "Real-time dashboard with portfolio analytics and transfer history",
+    "Vector embeddings for semantic transaction search",
+    "Automated background jobs for price enrichment and data ingestion",
+    "Supabase authentication with email and OAuth support"
+  ],
+  "publicApiSurface": [
+    "GET /api/healthz",
+    "GET /api/transfers",
+    "GET /api/portfolio",
+    "GET /api/search",
+    "POST /api/chat",
+    "POST /api/wallets",
+    "POST /api/ingest",
+    "POST /api/prices",
+    "POST /api/embeddings",
+    "POST /tool/sql"
+  ]
+}
